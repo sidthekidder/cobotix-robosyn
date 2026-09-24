@@ -224,5 +224,6 @@ eval_result/
 !.env.example
 /outputs/
 /wandb/
+/artifacts/
 *.pem
 *.key

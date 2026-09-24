@@ -53,6 +53,27 @@ LeRobot and the challenge policy environments still need their policy-specific
 installation before collecting datasets or evaluating a checkpoint. They are
 not required for the simulator compatibility test below.
 
+## ACT evaluation environment
+
+The ACT policy uses its own `uv` environment. The following setup was verified
+on an A40 pod with the official EmbodiChain image:
+
+```bash
+apt-get update && apt-get install -y ffmpeg git
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+cd /workspace/RoboSynChallenge/policy/act
+uv sync --frozen
+```
+
+`ffmpeg` is required by the evaluator when it writes episode videos. The
+Open3DV-hosted CPython 3.10 `dexsim_engine==0.4.3` wheel was replaced without a
+version change. Its current SHA256 is pinned in `policy/act/uv.lock`; using the
+former hash causes `uv sync --frozen` to fail with a checksum mismatch.
+
+The verified smoke-test command is recorded in
+[`docs/baseline_click_bell.md`](baseline_click_bell.md).
+
 ## Compatibility test
 
 ```bash
@@ -69,3 +90,8 @@ The verified run selected the Hybrid Vulkan renderer on the A40, completed
 Stop the pod as soon as testing or training finishes. A stopped pod releases
 the GPU but retains its persistent disk, which continues to incur storage cost.
 Terminate the pod after copying any results that need to be kept.
+
+Changing ports or other pod configuration can recreate a container. On a pod
+without a persistent volume, that erases its container disk. Configure required
+ports when the pod is created and copy results off the pod before changing its
+configuration or terminating it.
