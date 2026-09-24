@@ -3,9 +3,10 @@
 ## Status
 Official repository downloaded on 2026-09-23. Base commit:
 7503c7cb000bdf869cdba302e329724b3a223c75.
-Shallow clone; use `git fetch --unshallow upstream` if older history is needed.
+Full upstream Git history fetched for publishing.
 Local branch: `cobotix/baseline`. `upstream` points to the organizers.
-No Cobotix GitHub repository has been created or connected. No cloud spending.
+Private GitHub repository: https://github.com/sidthekidder/cobotix-robosyn
+No cloud spending.
 Git identity was already configured and has not been changed.
 
 ## Local inspection
@@ -56,5 +57,5 @@ results are estimates; drawer results used modified physics.
 Provide evaluation code, task-to-checkpoint mapping, dependency/run instructions,
 training-data provenance, and the official policy adapter files. Validate on
 fresh seeds and configurations. Keep test parameters separate from tuning.
-Create a Cobotix remote when ready, then add it as `origin`; pushes are configured
-to target origin rather than upstream. Nothing has been pushed.
+The Cobotix repository is configured as `origin`; pushes target origin rather
+than upstream. Publish with `git push -u origin cobotix/baseline`.
