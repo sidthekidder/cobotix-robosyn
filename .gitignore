@@ -225,5 +225,6 @@ eval_result/
 /outputs/
 /wandb/
 /artifacts/
+/benchmark_runs/
 *.pem
 *.key

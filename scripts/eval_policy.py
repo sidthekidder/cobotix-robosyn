@@ -571,6 +571,33 @@ def collect_platform_metadata():
     }
 
 
+def to_json_value(value):
+    """Convert tensors and NumPy values returned by task diagnostics to JSON."""
+    if isinstance(value, torch.Tensor):
+        value = value.detach().cpu()
+        return value.item() if value.numel() == 1 else value.tolist()
+    if isinstance(value, np.ndarray):
+        return value.item() if value.size == 1 else value.tolist()
+    if isinstance(value, np.generic):
+        return value.item()
+    if isinstance(value, dict):
+        return {str(key): to_json_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [to_json_value(item) for item in value]
+    return value
+
+
+def collect_episode_diagnostics(env):
+    """Collect optional task diagnostics without changing evaluation behavior."""
+    getter = getattr(env.unwrapped, "get_episode_diagnostics", None)
+    if not callable(getter):
+        return {}
+    diagnostics = getter()
+    if not isinstance(diagnostics, dict):
+        raise TypeError("get_episode_diagnostics() must return a dictionary.")
+    return to_json_value(diagnostics)
+
+
 def format_platform(platform_metadata):
     accelerators = platform_metadata["accelerators"]
     accelerator_text = ", ".join(accelerators) if accelerators else "none detected"
@@ -829,6 +856,7 @@ def main():
 
             success_count += int(episode_success)
             effective_steps = env_steps if episode_success else max_env_steps
+            diagnostics = collect_episode_diagnostics(env)
             action_steps.append(effective_steps)
             all_inference_times.extend(inference_times)
             episode_inference_totals.append(sum(inference_times))
@@ -840,6 +868,7 @@ def main():
                     "seed": ep_seed,
                     "success": episode_success,
                     "action_steps": effective_steps,
+                    "diagnostics": diagnostics,
                     "expert_plan_steps": (
                         expert_result["expert_plan_steps"]
                         if expert_result is not None

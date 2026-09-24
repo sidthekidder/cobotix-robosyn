@@ -44,6 +44,9 @@ class ClickBellEnv(EmbodiedEnv):
         self._success_flag = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
+        self._max_press_depth = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
     def create_demo_action_list(self, *args, **kwargs):
         """
         Create a demonstration action list for the current task.
@@ -136,6 +139,7 @@ class ClickBellEnv(EmbodiedEnv):
         # Treat any detectable displacement as success (with tiny epsilon to avoid numerical noise).
         press_depth = -button_qpos[:, 0]
         movement_threshold = 0.0048
+        self._max_press_depth = torch.maximum(self._max_press_depth, press_depth)
         current_success = press_depth >= movement_threshold
 
         # 粘滞锁存：回合内任意一步按到位即记为成功
@@ -151,6 +155,17 @@ class ClickBellEnv(EmbodiedEnv):
 
     def is_task_success(self, **kwargs) -> torch.Tensor:
         return self._success_flag
+
+    def get_episode_diagnostics(self) -> Dict[str, torch.Tensor | float]:
+        """Return read-only contact diagnostics for benchmark reporting."""
+        button = self.sim.get_articulation("button")
+        final_press_depth = -button.get_qpos()[:, 0]
+        return {
+            "max_press_depth_m": self._max_press_depth.clone(),
+            "final_press_depth_m": final_press_depth.clone(),
+            "movement_threshold_m": 0.0048,
+        }
+
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
         obs, info = super().reset(seed=seed, options=options)
 
@@ -161,6 +176,7 @@ class ClickBellEnv(EmbodiedEnv):
             torch.arange(self.num_envs, dtype=torch.int32, device=self.device),
         )
         self._success_flag[reset_ids] = False
+        self._max_press_depth[reset_ids] = 0.0
 
         return obs, info
 
