@@ -35,6 +35,6 @@ where = ["."]
 exclude = ["docs"]
 
 [tool.setuptools.dynamic]
-version = { file = ["RoboSynChallenge/VERSION"] }
+version = { file = ["robosynchallenge/VERSION"] }
 
 [tool.black]

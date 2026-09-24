@@ -217,3 +217,12 @@ eval_result/
 
 **/results/
 .codex
+
+# Cobotix local artifacts and credentials
+.DS_Store
+.env.*
+!.env.example
+/outputs/
+/wandb/
+*.pem
+*.key
