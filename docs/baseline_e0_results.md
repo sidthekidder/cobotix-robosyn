@@ -90,12 +90,35 @@ failures, 51 displaced the bell by less than 1.5 mm, 6 reached 1.5–4.0 mm, and
 stopped at 4.0–4.8 mm. Success in the broad hard-position bins was unchanged:
 12/39 for x >= 0.70 m and 5/26 for y >= 0.15 m.
 
+## Targeted inference pilots
+
+Two inference-only changes were tested separately on a fixed 20-scene development
+set. The set was deliberately enriched with 10 H50 partial-contact failures, eight
+early H50 successes, and two late H50 successes, so its success rates are useful
+for paired debugging rather than estimates of the challenge score. H50 scored
+10/20 on this set.
+
+The contact-plateau trigger cleared the remaining 50-action queue and requested a
+new ACT chunk after a shallow press stopped improving. It appeared to score 11/20,
+preserving all 10 reference successes and flipping one reference failure. That
+flip had zero recovery triggers, however. The trigger fired 14 times across seven
+other episodes and none of those episodes succeeded. The apparent one-scene gain
+is therefore run-to-run variation rather than evidence that the recovery rule
+worked. The candidate did not advance to a held-out evaluation.
+
+ACT temporal ensembling with coefficient 0.01 scored 3/20. It rescued one H50
+failure but broke eight H50 successes; the paired exact McNemar p-value was
+0.0391. It also required inference on every action step: 6,289 calls and 314.45
+mean action steps, compared with 96 calls and 199.50 mean action steps in the
+contact-trigger run. This implementation is both less effective and much more
+expensive for the released checkpoint.
+
 ## Next experiment
 
-Keep H50 as the reference horizon. Inspect matched outcome flips to identify the
-visual or trajectory signatures that distinguish the 10 H10 rescues from the 21
-regressions. Then test a targeted recovery rule on a fixed development subset,
-such as replanning only after stalled end-effector progress or a failed contact
-approach. This preserves the checkpoint's useful long-chunk behavior while
-testing feedback where the baseline diagnostics show it is needed. Separately,
-audit demonstration coverage in the hard x/y regions before retraining.
+Keep H50 as the reference and do not combine either rejected inference change.
+The next useful intervention is data-side: map failures and demonstration coverage
+over bell position and contact depth, then fine-tune with more examples from the
+hard x >= 0.70 m and y >= 0.15 m regions and from trajectories that recover after
+partial contact. Evaluate the resulting checkpoint first on a fixed development
+set and then once on a separate held-out seed set. This tests whether the missing
+behavior can be learned without disturbing H50's successful trajectories.
