@@ -51,17 +51,17 @@ nudge is sufficient. The oracle replaced roughly the last 11–18 approach steps
 while the end effector was still 2.6–13.4 cm laterally and 6.8–12.7 cm
 vertically from the exact expert target.
 
-The next useful ablation is a deployable scheduled replan that clears ACT's
-queued actions around step 30–35 and reruns inference every 2–5 actions during
-the contact phase. It requires no expert plan or simulator state and tests the
-same open-loop hypothesis without privileged information. Tune it on a separate
-development split before evaluating the held-out 100 episodes.
+The follow-up deployable ablation cleared ACT's queued actions on a fixed
+schedule without expert information or simulator state. It did not improve the
+development result: the unchanged baseline scored 13/20, replanning every five
+steps from steps 30–80 scored 8/20, and one replan at step 35 scored 11/20. See
+`click_bell_scheduled_replan_results.md` for the paired analysis.
 
-After that ablation, the most promising training change is to oversample and
-weight the last 20–30 demonstration frames, including small corrective motions
-near the button. Camera augmentation should be evaluated separately because one
-of the 13 failures appeared to be a camera/perception exception rather than the
-dominant open-loop contact failure.
+The most promising next change is therefore to oversample and weight the last
+20–30 demonstration frames and add small corrective motions near the button.
+Camera augmentation should be evaluated separately because one of the 13
+failures appeared to be a camera/perception exception rather than the dominant
+open-loop contact failure.
 
 ## Reproducibility
 
