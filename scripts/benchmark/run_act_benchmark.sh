@@ -25,6 +25,10 @@ ACT_RECOVERY_MIN_PRESS_DEPTH_M="${ACT_RECOVERY_MIN_PRESS_DEPTH_M:-0.0011}"
 ACT_RECOVERY_PRESS_EPSILON_M="${ACT_RECOVERY_PRESS_EPSILON_M:-0.0001}"
 ACT_RECOVERY_COOLDOWN_STEPS="${ACT_RECOVERY_COOLDOWN_STEPS:-25}"
 ACT_RECOVERY_MAX_REPLANS="${ACT_RECOVERY_MAX_REPLANS:-2}"
+ACT_SCHEDULED_REPLAN_ENABLED="${ACT_SCHEDULED_REPLAN_ENABLED:-false}"
+ACT_SCHEDULED_REPLAN_START_STEP="${ACT_SCHEDULED_REPLAN_START_STEP:-30}"
+ACT_SCHEDULED_REPLAN_INTERVAL_STEPS="${ACT_SCHEDULED_REPLAN_INTERVAL_STEPS:-5}"
+ACT_SCHEDULED_REPLAN_END_STEP="${ACT_SCHEDULED_REPLAN_END_STEP:-80}"
 ACT_PRESS_ORACLE_ENABLED="${ACT_PRESS_ORACLE_ENABLED:-false}"
 ACT_PRESS_ORACLE_MIN_STEP="${ACT_PRESS_ORACLE_MIN_STEP:-35}"
 ACT_PRESS_ORACLE_TARGET_PLAN_STEP="${ACT_PRESS_ORACLE_TARGET_PLAN_STEP:-49}"
@@ -59,20 +63,34 @@ if [[ "$ACT_RECOVERY_ENABLED" != "true" && "$ACT_RECOVERY_ENABLED" != "false" ]]
     echo "ACT_RECOVERY_ENABLED must be true or false." >&2
     exit 2
 fi
+if [[ "$ACT_SCHEDULED_REPLAN_ENABLED" != "true" && "$ACT_SCHEDULED_REPLAN_ENABLED" != "false" ]]; then
+    echo "ACT_SCHEDULED_REPLAN_ENABLED must be true or false." >&2
+    exit 2
+fi
 if [[ "$ACT_PRESS_ORACLE_ENABLED" != "true" && "$ACT_PRESS_ORACLE_ENABLED" != "false" ]]; then
     echo "ACT_PRESS_ORACLE_ENABLED must be true or false." >&2
     exit 2
 fi
-if [[ "$ACT_PRESS_ORACLE_ENABLED" == "true" && "$ACT_RECOVERY_ENABLED" == "true" ]]; then
-    echo "The diagnostic press oracle and contact recovery must run separately." >&2
+enabled_replan_modes=0
+if [[ "$ACT_RECOVERY_ENABLED" == "true" ]]; then
+    ((enabled_replan_modes += 1))
+fi
+if [[ "$ACT_SCHEDULED_REPLAN_ENABLED" == "true" ]]; then
+    ((enabled_replan_modes += 1))
+fi
+if [[ "$ACT_PRESS_ORACLE_ENABLED" == "true" ]]; then
+    ((enabled_replan_modes += 1))
+fi
+if (( enabled_replan_modes > 1 )); then
+    echo "Contact recovery, scheduled replanning, and the press oracle must run separately." >&2
     exit 2
 fi
 if [[ -n "$ACT_TEMPORAL_ENSEMBLE_COEFF" ]] && ! [[ "$ACT_TEMPORAL_ENSEMBLE_COEFF" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
     echo "ACT_TEMPORAL_ENSEMBLE_COEFF must be a non-negative number." >&2
     exit 2
 fi
-if [[ -n "$ACT_TEMPORAL_ENSEMBLE_COEFF" && "$ACT_RECOVERY_ENABLED" == "true" ]]; then
-    echo "Temporal ensembling and contact recovery must be evaluated separately." >&2
+if [[ -n "$ACT_TEMPORAL_ENSEMBLE_COEFF" && ( "$ACT_RECOVERY_ENABLED" == "true" || "$ACT_SCHEDULED_REPLAN_ENABLED" == "true" ) ]]; then
+    echo "Temporal ensembling and replanning must be evaluated separately." >&2
     exit 2
 fi
 for value_name in ACT_RECOVERY_MIN_STEP ACT_RECOVERY_PLATEAU_STEPS ACT_RECOVERY_MAX_REPLANS; do
@@ -82,6 +100,17 @@ for value_name in ACT_RECOVERY_MIN_STEP ACT_RECOVERY_PLATEAU_STEPS ACT_RECOVERY_
         exit 2
     fi
 done
+for value_name in ACT_SCHEDULED_REPLAN_START_STEP ACT_SCHEDULED_REPLAN_INTERVAL_STEPS ACT_SCHEDULED_REPLAN_END_STEP; do
+    value="${!value_name}"
+    if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+        echo "$value_name must be a positive integer, got: $value" >&2
+        exit 2
+    fi
+done
+if (( ACT_SCHEDULED_REPLAN_END_STEP < ACT_SCHEDULED_REPLAN_START_STEP )); then
+    echo "ACT_SCHEDULED_REPLAN_END_STEP must be at least ACT_SCHEDULED_REPLAN_START_STEP." >&2
+    exit 2
+fi
 if ! [[ "$ACT_RECOVERY_COOLDOWN_STEPS" =~ ^[0-9]+$ ]]; then
     echo "ACT_RECOVERY_COOLDOWN_STEPS must be a non-negative integer." >&2
     exit 2
@@ -178,6 +207,10 @@ ACT_RECOVERY_MIN_PRESS_DEPTH_M="$ACT_RECOVERY_MIN_PRESS_DEPTH_M" \
 ACT_RECOVERY_PRESS_EPSILON_M="$ACT_RECOVERY_PRESS_EPSILON_M" \
 ACT_RECOVERY_COOLDOWN_STEPS="$ACT_RECOVERY_COOLDOWN_STEPS" \
 ACT_RECOVERY_MAX_REPLANS="$ACT_RECOVERY_MAX_REPLANS" \
+ACT_SCHEDULED_REPLAN_ENABLED="$ACT_SCHEDULED_REPLAN_ENABLED" \
+ACT_SCHEDULED_REPLAN_START_STEP="$ACT_SCHEDULED_REPLAN_START_STEP" \
+ACT_SCHEDULED_REPLAN_INTERVAL_STEPS="$ACT_SCHEDULED_REPLAN_INTERVAL_STEPS" \
+ACT_SCHEDULED_REPLAN_END_STEP="$ACT_SCHEDULED_REPLAN_END_STEP" \
 ACT_PRESS_ORACLE_ENABLED="$ACT_PRESS_ORACLE_ENABLED" \
 ACT_PRESS_ORACLE_MIN_STEP="$ACT_PRESS_ORACLE_MIN_STEP" \
 ACT_PRESS_ORACLE_TARGET_PLAN_STEP="$ACT_PRESS_ORACLE_TARGET_PLAN_STEP" \
@@ -226,6 +259,12 @@ manifest = {
         "press_epsilon_m": float(os.environ["ACT_RECOVERY_PRESS_EPSILON_M"]),
         "cooldown_steps": int(os.environ["ACT_RECOVERY_COOLDOWN_STEPS"]),
         "max_replans": int(os.environ["ACT_RECOVERY_MAX_REPLANS"]),
+    },
+    "act_scheduled_replan": {
+        "enabled": os.environ["ACT_SCHEDULED_REPLAN_ENABLED"] == "true",
+        "start_step": int(os.environ["ACT_SCHEDULED_REPLAN_START_STEP"]),
+        "interval_steps": int(os.environ["ACT_SCHEDULED_REPLAN_INTERVAL_STEPS"]),
+        "end_step": int(os.environ["ACT_SCHEDULED_REPLAN_END_STEP"]),
     },
     "act_press_oracle": {
         "enabled": os.environ["ACT_PRESS_ORACLE_ENABLED"] == "true",
@@ -277,6 +316,14 @@ if [[ "$ACT_RECOVERY_ENABLED" == "true" ]]; then
         --act_recovery_press_epsilon_m "$ACT_RECOVERY_PRESS_EPSILON_M"
         --act_recovery_cooldown_steps "$ACT_RECOVERY_COOLDOWN_STEPS"
         --act_recovery_max_replans "$ACT_RECOVERY_MAX_REPLANS"
+    )
+fi
+if [[ "$ACT_SCHEDULED_REPLAN_ENABLED" == "true" ]]; then
+    act_overrides+=(
+        --act_scheduled_replan_enabled true
+        --act_scheduled_replan_start_step "$ACT_SCHEDULED_REPLAN_START_STEP"
+        --act_scheduled_replan_interval_steps "$ACT_SCHEDULED_REPLAN_INTERVAL_STEPS"
+        --act_scheduled_replan_end_step "$ACT_SCHEDULED_REPLAN_END_STEP"
     )
 fi
 if [[ "$ACT_PRESS_ORACLE_ENABLED" == "true" ]]; then

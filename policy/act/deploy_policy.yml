@@ -37,6 +37,10 @@ act_recovery_min_press_depth_m: 0.0011
 act_recovery_press_epsilon_m: 0.0001
 act_recovery_cooldown_steps: 25
 act_recovery_max_replans: 2
+act_scheduled_replan_enabled: false
+act_scheduled_replan_start_step: 30
+act_scheduled_replan_interval_steps: 5
+act_scheduled_replan_end_step: 80
 act_press_oracle_enabled: false
 act_press_oracle_min_step: 35
 act_press_oracle_target_plan_step: 49

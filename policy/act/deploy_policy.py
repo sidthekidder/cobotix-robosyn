@@ -13,7 +13,11 @@ import torch
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.act.modeling_act import ACTPolicy
 from policy.inference_timing import finish_inference, start_inference
-from policy.act.recovery import ContactPlateauRecovery, ProximityPressOracle
+from policy.act.recovery import (
+    ContactPlateauRecovery,
+    ProximityPressOracle,
+    ScheduledReplan,
+)
 
 
 def _as_bool(value):
@@ -44,9 +48,14 @@ def get_model(usr_args):
     cli_overrides = [f"--device={device}"]
     temporal_ensemble_coeff = usr_args.get("act_temporal_ensemble_coeff")
     recovery_enabled = _as_bool(usr_args.get("act_recovery_enabled", False))
-    if temporal_ensemble_coeff is not None and recovery_enabled:
+    scheduled_replan_enabled = _as_bool(
+        usr_args.get("act_scheduled_replan_enabled", False)
+    )
+    if temporal_ensemble_coeff is not None and (
+        recovery_enabled or scheduled_replan_enabled
+    ):
         raise ValueError(
-            "Contact recovery and temporal ensembling must be evaluated separately."
+            "Replanning and temporal ensembling must be evaluated separately."
         )
     n_action_steps = usr_args.get("n_action_steps")
     if temporal_ensemble_coeff is not None:
@@ -121,9 +130,24 @@ def get_model(usr_args):
             cooldown_steps=int(usr_args.get("act_recovery_cooldown_steps", 25)),
             max_replans=int(usr_args.get("act_recovery_max_replans", 2)),
         )
+    policy.act_scheduled_replan = None
+    if scheduled_replan_enabled:
+        policy.act_scheduled_replan = ScheduledReplan(
+            start_step=int(usr_args.get("act_scheduled_replan_start_step", 30)),
+            interval_steps=int(
+                usr_args.get("act_scheduled_replan_interval_steps", 5)
+            ),
+            end_step=int(usr_args.get("act_scheduled_replan_end_step", 80)),
+        )
     oracle_enabled = _as_bool(usr_args.get("act_press_oracle_enabled", False))
-    if oracle_enabled and recovery_enabled:
-        raise ValueError("The press oracle and contact recovery must be evaluated separately.")
+    enabled_replan_modes = sum(
+        (recovery_enabled, scheduled_replan_enabled, oracle_enabled)
+    )
+    if enabled_replan_modes > 1:
+        raise ValueError(
+            "Contact recovery, scheduled replanning, and the press oracle "
+            "must be evaluated separately."
+        )
     policy.act_press_oracle = None
     if oracle_enabled:
         policy.act_press_oracle = ProximityPressOracle(
@@ -229,6 +253,12 @@ def eval(env, model, obs):
             )
             if should_replan:
                 model._action_queue.clear()
+        if model.act_scheduled_replan is not None:
+            should_replan = model.act_scheduled_replan.observe(
+                queued_actions=len(model._action_queue)
+            )
+            if should_replan:
+                model._action_queue.clear()
         if isinstance(truncated, torch.Tensor):
             is_truncated = truncated.any().item()
         elif isinstance(truncated, np.ndarray):
@@ -245,6 +275,8 @@ def reset_model(model):
     model.reset()
     if model.act_recovery is not None:
         model.act_recovery.reset()
+    if model.act_scheduled_replan is not None:
+        model.act_scheduled_replan.reset()
     if model.act_press_oracle is not None:
         model.act_press_oracle.reset()
 
@@ -255,6 +287,11 @@ def get_episode_metrics(model):
             {"enabled": False}
             if model.act_recovery is None
             else model.act_recovery.metrics()
+        ),
+        "scheduled_replan": (
+            {"enabled": False}
+            if model.act_scheduled_replan is None
+            else model.act_scheduled_replan.metrics()
         ),
         "proximity_press_oracle": (
             {"enabled": False}

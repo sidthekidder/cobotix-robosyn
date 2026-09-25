@@ -10,6 +10,57 @@ import torch
 
 
 @dataclass
+class ScheduledReplan:
+    """Discard stale ACT chunks at a fixed cadence during final approach."""
+
+    start_step: int = 30
+    interval_steps: int = 5
+    end_step: int = 80
+    step: int = 0
+    events: list[dict] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.start_step < 1:
+            raise ValueError("start_step must be positive")
+        if self.interval_steps < 1:
+            raise ValueError("interval_steps must be positive")
+        if self.end_step < self.start_step:
+            raise ValueError("end_step must be greater than or equal to start_step")
+
+    def reset(self) -> None:
+        self.step = 0
+        self.events.clear()
+
+    def observe(self, *, queued_actions: int) -> bool:
+        """Record one environment step and request a replan on schedule."""
+        self.step += 1
+        scheduled = (
+            self.start_step <= self.step <= self.end_step
+            and (self.step - self.start_step) % self.interval_steps == 0
+        )
+        if not scheduled or queued_actions <= 0:
+            return False
+
+        self.events.append(
+            {
+                "step": self.step,
+                "discarded_actions": int(queued_actions),
+            }
+        )
+        return True
+
+    def metrics(self) -> dict:
+        return {
+            "enabled": True,
+            "start_step": self.start_step,
+            "interval_steps": self.interval_steps,
+            "end_step": self.end_step,
+            "replan_count": len(self.events),
+            "events": list(self.events),
+        }
+
+
+@dataclass
 class ContactPlateauRecovery:
     """Request a replan when partial task progress stops improving."""
 

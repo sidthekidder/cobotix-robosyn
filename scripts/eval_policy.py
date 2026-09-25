@@ -979,6 +979,18 @@ def main():
             "act_recovery_max_replans": config.get(
                 "act_recovery_max_replans"
             ),
+            "act_scheduled_replan_enabled": config.get(
+                "act_scheduled_replan_enabled", False
+            ),
+            "act_scheduled_replan_start_step": config.get(
+                "act_scheduled_replan_start_step"
+            ),
+            "act_scheduled_replan_interval_steps": config.get(
+                "act_scheduled_replan_interval_steps"
+            ),
+            "act_scheduled_replan_end_step": config.get(
+                "act_scheduled_replan_end_step"
+            ),
             "act_press_oracle_enabled": config.get(
                 "act_press_oracle_enabled", False
             ),
