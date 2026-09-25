@@ -70,9 +70,32 @@ number may use different seeds, environment state, or evaluation revisions, so
 the gap should be treated as a reproducibility question rather than an improvement
 claim.
 
+## Shorter executed-horizon experiment
+
+The same 100 unfiltered seeds were evaluated with `ACT_N_ACTION_STEPS=10`, so
+the policy replanned after at most 10 actions instead of executing the released
+50-action chunk. H10 scored 40/100 (40.0%; 95% Wilson interval 30.9%–49.8%),
+compared with 51/100 for H50.
+
+The paired outcomes show why the aggregate score fell: H10 rescued 10 H50
+failures but broke 21 H50 successes. Thirty scenes succeeded under both horizons
+and 39 failed under both. The two-sided exact McNemar p-value is 0.071, so this
+100-scene experiment is evidence against adopting H10, but does not establish a
+population-level difference at the conventional 5% threshold.
+
+H10 also made failures longer rather than recovering from them. Median failed
+right-arm path increased from 1.70 m to 2.79 m, mean action steps increased from
+203.48 to 242.20, and inference calls increased from 455 to 2,496. Of its 60
+failures, 51 displaced the bell by less than 1.5 mm, 6 reached 1.5–4.0 mm, and 3
+stopped at 4.0–4.8 mm. Success in the broad hard-position bins was unchanged:
+12/39 for x >= 0.70 m and 5/26 for y >= 0.15 m.
+
 ## Next experiment
 
-Run fixed, stratified scene sets with `ACT_N_ACTION_STEPS` set to 5, 10, 25, and
-50. Compare success, inference calls, press depth, and right-arm path length,
-with separate reporting for central and workspace-edge scenes. Then audit and
-rebalance demonstration coverage in the hard x/y regions before retraining.
+Keep H50 as the reference horizon. Inspect matched outcome flips to identify the
+visual or trajectory signatures that distinguish the 10 H10 rescues from the 21
+regressions. Then test a targeted recovery rule on a fixed development subset,
+such as replanning only after stalled end-effector progress or a failed contact
+approach. This preserves the checkpoint's useful long-chunk behavior while
+testing feedback where the baseline diagnostics show it is needed. Separately,
+audit demonstration coverage in the hard x/y regions before retraining.
