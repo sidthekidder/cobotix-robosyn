@@ -61,6 +61,66 @@ class ScheduledReplan:
 
 
 @dataclass
+class ActionQueueBlender:
+    """Smooth a queue replacement over a small number of executed actions."""
+
+    blend_steps: int = 0
+    events: list[dict] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if self.blend_steps < 0:
+            raise ValueError("blend_steps must be non-negative")
+        self._old_actions = []
+        self._blend_index = 0
+
+    def reset(self) -> None:
+        self.events.clear()
+        self._old_actions.clear()
+        self._blend_index = 0
+
+    def begin(self, queued_actions) -> None:
+        self._old_actions = [
+            torch.as_tensor(action).detach().clone()
+            for action in list(queued_actions)[: self.blend_steps]
+        ]
+        self._blend_index = 0
+        self.events.append(
+            {
+                "available_old_actions": len(queued_actions),
+                "planned_blend_steps": len(self._old_actions),
+            }
+        )
+
+    def apply(self, new_action: torch.Tensor) -> torch.Tensor:
+        if self._blend_index >= len(self._old_actions):
+            return new_action
+        old_action = self._old_actions[self._blend_index].to(
+            device=new_action.device, dtype=new_action.dtype
+        )
+        while old_action.ndim < new_action.ndim:
+            old_action = old_action.unsqueeze(0)
+        if old_action.shape != new_action.shape:
+            raise ValueError(
+                "Cannot blend queued action shape "
+                f"{tuple(old_action.shape)} with new shape {tuple(new_action.shape)}"
+            )
+        alpha = (self._blend_index + 1) / (len(self._old_actions) + 1)
+        blended = torch.lerp(old_action, new_action, alpha)
+        self._blend_index += 1
+        self.events[-1]["executed_blend_steps"] = self._blend_index
+        if self._blend_index == len(self._old_actions):
+            self._old_actions.clear()
+        return blended
+
+    def metrics(self) -> dict:
+        return {
+            "enabled": self.blend_steps > 0,
+            "blend_steps": self.blend_steps,
+            "events": list(self.events),
+        }
+
+
+@dataclass
 class ContactPlateauRecovery:
     """Request a replan when partial task progress stops improving."""
 

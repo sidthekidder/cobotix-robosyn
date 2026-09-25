@@ -991,6 +991,9 @@ def main():
             "act_scheduled_replan_end_step": config.get(
                 "act_scheduled_replan_end_step"
             ),
+            "act_scheduled_replan_blend_steps": config.get(
+                "act_scheduled_replan_blend_steps", 0
+            ),
             "act_press_oracle_enabled": config.get(
                 "act_press_oracle_enabled", False
             ),

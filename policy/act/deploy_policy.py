@@ -14,6 +14,7 @@ from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.act.modeling_act import ACTPolicy
 from policy.inference_timing import finish_inference, start_inference
 from policy.act.recovery import (
+    ActionQueueBlender,
     ContactPlateauRecovery,
     ProximityPressOracle,
     ScheduledReplan,
@@ -131,6 +132,9 @@ def get_model(usr_args):
             max_replans=int(usr_args.get("act_recovery_max_replans", 2)),
         )
     policy.act_scheduled_replan = None
+    policy.act_replan_blender = ActionQueueBlender(
+        blend_steps=int(usr_args.get("act_scheduled_replan_blend_steps", 0))
+    )
     if scheduled_replan_enabled:
         policy.act_scheduled_replan = ScheduledReplan(
             start_step=int(usr_args.get("act_scheduled_replan_start_step", 30)),
@@ -221,6 +225,8 @@ def eval(env, model, obs):
             action = action.unsqueeze(0)
         if action.ndim != 2:
             raise ValueError(f"Expected policy action shape [B, D], but got {tuple(action.shape)}.")
+        if oracle_action is None:
+            action = model.act_replan_blender.apply(action)
 
         env_action_dim = int(np.prod(env.unwrapped.single_action_space.shape))
         policy_action_dim = int(action.shape[-1])
@@ -258,6 +264,7 @@ def eval(env, model, obs):
                 queued_actions=len(model._action_queue)
             )
             if should_replan:
+                model.act_replan_blender.begin(model._action_queue)
                 model._action_queue.clear()
         if isinstance(truncated, torch.Tensor):
             is_truncated = truncated.any().item()
@@ -277,6 +284,7 @@ def reset_model(model):
         model.act_recovery.reset()
     if model.act_scheduled_replan is not None:
         model.act_scheduled_replan.reset()
+    model.act_replan_blender.reset()
     if model.act_press_oracle is not None:
         model.act_press_oracle.reset()
 
@@ -293,6 +301,7 @@ def get_episode_metrics(model):
             if model.act_scheduled_replan is None
             else model.act_scheduled_replan.metrics()
         ),
+        "scheduled_replan_blending": model.act_replan_blender.metrics(),
         "proximity_press_oracle": (
             {"enabled": False}
             if model.act_press_oracle is None
