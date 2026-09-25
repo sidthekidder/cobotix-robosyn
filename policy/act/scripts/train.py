@@ -262,6 +262,7 @@ def main():
 
     from lerobot.configs.default import DatasetConfig
     from lerobot.configs.default import WandBConfig
+    from lerobot.configs.policies import PreTrainedConfig
     from lerobot.configs.train import TrainPipelineConfig
     from lerobot.policies.act.configuration_act import ACTConfig
     lerobot_train = _patch_lerobot_dataset_factory(
@@ -283,7 +284,7 @@ def main():
     }
 
     if args.pretrained_policy:
-        policy_config = ACTConfig.from_pretrained(args.pretrained_policy)
+        policy_config = PreTrainedConfig.from_pretrained(args.pretrained_policy)
         if policy_config.chunk_size != args.chunk_size:
             raise ValueError(
                 "--chunk-size must match the pretrained checkpoint: "
