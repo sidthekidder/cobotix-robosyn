@@ -25,6 +25,13 @@ ACT_RECOVERY_MIN_PRESS_DEPTH_M="${ACT_RECOVERY_MIN_PRESS_DEPTH_M:-0.0011}"
 ACT_RECOVERY_PRESS_EPSILON_M="${ACT_RECOVERY_PRESS_EPSILON_M:-0.0001}"
 ACT_RECOVERY_COOLDOWN_STEPS="${ACT_RECOVERY_COOLDOWN_STEPS:-25}"
 ACT_RECOVERY_MAX_REPLANS="${ACT_RECOVERY_MAX_REPLANS:-2}"
+ACT_PRESS_ORACLE_ENABLED="${ACT_PRESS_ORACLE_ENABLED:-false}"
+ACT_PRESS_ORACLE_MIN_STEP="${ACT_PRESS_ORACLE_MIN_STEP:-35}"
+ACT_PRESS_ORACLE_TARGET_PLAN_STEP="${ACT_PRESS_ORACLE_TARGET_PLAN_STEP:-49}"
+ACT_PRESS_ORACLE_TRIGGER_MAX_JOINT_ERROR_RAD="${ACT_PRESS_ORACLE_TRIGGER_MAX_JOINT_ERROR_RAD:-0.45}"
+ACT_PRESS_ORACLE_INTERPOLATION_STEPS="${ACT_PRESS_ORACLE_INTERPOLATION_STEPS:-12}"
+ACT_PRESS_ORACLE_HOLD_STEPS="${ACT_PRESS_ORACLE_HOLD_STEPS:-8}"
+ACT_PRESS_ORACLE_TELEMETRY_STRIDE="${ACT_PRESS_ORACLE_TELEMETRY_STRIDE:-2}"
 EVAL_EXPERT_CHECK="${EVAL_EXPERT_CHECK:-true}"
 EVAL_EPISODE_SEEDS="${EVAL_EPISODE_SEEDS:-}"
 RUN_ID="${RUN_ID:-${TASK}_act_$(date -u +%Y%m%dT%H%M%SZ)}"
@@ -50,6 +57,14 @@ if [[ "$EVAL_EXPERT_CHECK" != "true" && "$EVAL_EXPERT_CHECK" != "false" ]]; then
 fi
 if [[ "$ACT_RECOVERY_ENABLED" != "true" && "$ACT_RECOVERY_ENABLED" != "false" ]]; then
     echo "ACT_RECOVERY_ENABLED must be true or false." >&2
+    exit 2
+fi
+if [[ "$ACT_PRESS_ORACLE_ENABLED" != "true" && "$ACT_PRESS_ORACLE_ENABLED" != "false" ]]; then
+    echo "ACT_PRESS_ORACLE_ENABLED must be true or false." >&2
+    exit 2
+fi
+if [[ "$ACT_PRESS_ORACLE_ENABLED" == "true" && "$ACT_RECOVERY_ENABLED" == "true" ]]; then
+    echo "The diagnostic press oracle and contact recovery must run separately." >&2
     exit 2
 fi
 if [[ -n "$ACT_TEMPORAL_ENSEMBLE_COEFF" ]] && ! [[ "$ACT_TEMPORAL_ENSEMBLE_COEFF" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
@@ -163,6 +178,13 @@ ACT_RECOVERY_MIN_PRESS_DEPTH_M="$ACT_RECOVERY_MIN_PRESS_DEPTH_M" \
 ACT_RECOVERY_PRESS_EPSILON_M="$ACT_RECOVERY_PRESS_EPSILON_M" \
 ACT_RECOVERY_COOLDOWN_STEPS="$ACT_RECOVERY_COOLDOWN_STEPS" \
 ACT_RECOVERY_MAX_REPLANS="$ACT_RECOVERY_MAX_REPLANS" \
+ACT_PRESS_ORACLE_ENABLED="$ACT_PRESS_ORACLE_ENABLED" \
+ACT_PRESS_ORACLE_MIN_STEP="$ACT_PRESS_ORACLE_MIN_STEP" \
+ACT_PRESS_ORACLE_TARGET_PLAN_STEP="$ACT_PRESS_ORACLE_TARGET_PLAN_STEP" \
+ACT_PRESS_ORACLE_TRIGGER_MAX_JOINT_ERROR_RAD="$ACT_PRESS_ORACLE_TRIGGER_MAX_JOINT_ERROR_RAD" \
+ACT_PRESS_ORACLE_INTERPOLATION_STEPS="$ACT_PRESS_ORACLE_INTERPOLATION_STEPS" \
+ACT_PRESS_ORACLE_HOLD_STEPS="$ACT_PRESS_ORACLE_HOLD_STEPS" \
+ACT_PRESS_ORACLE_TELEMETRY_STRIDE="$ACT_PRESS_ORACLE_TELEMETRY_STRIDE" \
 EVAL_EXPERT_CHECK="$EVAL_EXPERT_CHECK" \
 EVAL_EPISODE_SEEDS="$EVAL_EPISODE_SEEDS" \
 "$PYTHON_BIN" - "$RUN_DIR/run_manifest.json" <<'PY'
@@ -205,6 +227,16 @@ manifest = {
         "cooldown_steps": int(os.environ["ACT_RECOVERY_COOLDOWN_STEPS"]),
         "max_replans": int(os.environ["ACT_RECOVERY_MAX_REPLANS"]),
     },
+    "act_press_oracle": {
+        "enabled": os.environ["ACT_PRESS_ORACLE_ENABLED"] == "true",
+        "diagnostic_only": True,
+        "min_step": int(os.environ["ACT_PRESS_ORACLE_MIN_STEP"]),
+        "target_plan_step": int(os.environ["ACT_PRESS_ORACLE_TARGET_PLAN_STEP"]),
+        "trigger_max_joint_error_rad": float(os.environ["ACT_PRESS_ORACLE_TRIGGER_MAX_JOINT_ERROR_RAD"]),
+        "interpolation_steps": int(os.environ["ACT_PRESS_ORACLE_INTERPOLATION_STEPS"]),
+        "hold_steps": int(os.environ["ACT_PRESS_ORACLE_HOLD_STEPS"]),
+        "telemetry_stride": int(os.environ["ACT_PRESS_ORACLE_TELEMETRY_STRIDE"]),
+    },
     "eval_expert_check": os.environ["EVAL_EXPERT_CHECK"] == "true",
     "eval_episode_seeds": (
         json.loads(os.environ["EVAL_EPISODE_SEEDS"])
@@ -245,6 +277,17 @@ if [[ "$ACT_RECOVERY_ENABLED" == "true" ]]; then
         --act_recovery_press_epsilon_m "$ACT_RECOVERY_PRESS_EPSILON_M"
         --act_recovery_cooldown_steps "$ACT_RECOVERY_COOLDOWN_STEPS"
         --act_recovery_max_replans "$ACT_RECOVERY_MAX_REPLANS"
+    )
+fi
+if [[ "$ACT_PRESS_ORACLE_ENABLED" == "true" ]]; then
+    act_overrides+=(
+        --act_press_oracle_enabled true
+        --act_press_oracle_min_step "$ACT_PRESS_ORACLE_MIN_STEP"
+        --act_press_oracle_target_plan_step "$ACT_PRESS_ORACLE_TARGET_PLAN_STEP"
+        --act_press_oracle_trigger_max_joint_error_rad "$ACT_PRESS_ORACLE_TRIGGER_MAX_JOINT_ERROR_RAD"
+        --act_press_oracle_interpolation_steps "$ACT_PRESS_ORACLE_INTERPOLATION_STEPS"
+        --act_press_oracle_hold_steps "$ACT_PRESS_ORACLE_HOLD_STEPS"
+        --act_press_oracle_telemetry_stride "$ACT_PRESS_ORACLE_TELEMETRY_STRIDE"
     )
 fi
 if [[ -n "$EVAL_EPISODE_SEEDS" ]]; then

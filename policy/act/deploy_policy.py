@@ -13,7 +13,7 @@ import torch
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.act.modeling_act import ACTPolicy
 from policy.inference_timing import finish_inference, start_inference
-from policy.act.recovery import ContactPlateauRecovery
+from policy.act.recovery import ContactPlateauRecovery, ProximityPressOracle
 
 
 def _as_bool(value):
@@ -121,6 +121,27 @@ def get_model(usr_args):
             cooldown_steps=int(usr_args.get("act_recovery_cooldown_steps", 25)),
             max_replans=int(usr_args.get("act_recovery_max_replans", 2)),
         )
+    oracle_enabled = _as_bool(usr_args.get("act_press_oracle_enabled", False))
+    if oracle_enabled and recovery_enabled:
+        raise ValueError("The press oracle and contact recovery must be evaluated separately.")
+    policy.act_press_oracle = None
+    if oracle_enabled:
+        policy.act_press_oracle = ProximityPressOracle(
+            min_step=int(usr_args.get("act_press_oracle_min_step", 35)),
+            target_plan_step=int(
+                usr_args.get("act_press_oracle_target_plan_step", 49)
+            ),
+            trigger_max_joint_error_rad=float(
+                usr_args.get("act_press_oracle_trigger_max_joint_error_rad", 0.45)
+            ),
+            interpolation_steps=int(
+                usr_args.get("act_press_oracle_interpolation_steps", 12)
+            ),
+            hold_steps=int(usr_args.get("act_press_oracle_hold_steps", 8)),
+            telemetry_stride=int(
+                usr_args.get("act_press_oracle_telemetry_stride", 2)
+            ),
+        )
 
     if policy.act_step <= 0:
         raise ValueError(f"act_step must be positive, got {policy.act_step}.")
@@ -135,9 +156,17 @@ def eval(env, model, obs):
     inference_times_s = []
 
     for _ in range(model.act_step):
+        oracle_action = None
+        if model.act_press_oracle is not None:
+            oracle_action = model.act_press_oracle.next_action(env.unwrapped)
+            if oracle_action is not None:
+                model._action_queue.clear()
         runs_model_inference = (
-            model.config.temporal_ensemble_coeff is not None
-            or len(model._action_queue) == 0
+            oracle_action is None
+            and (
+                model.config.temporal_ensemble_coeff is not None
+                or len(model._action_queue) == 0
+            )
         )
         started_at = start_inference(model.act_device) if runs_model_inference else None
         state = final_obs
@@ -163,7 +192,7 @@ def eval(env, model, obs):
                 image_tensor = image_tensor / 255.0
             batch[image_key] = image_tensor
 
-        action = model.select_action(batch)
+        action = oracle_action if oracle_action is not None else model.select_action(batch)
         if action.ndim == 1:
             action = action.unsqueeze(0)
         if action.ndim != 2:
@@ -216,9 +245,20 @@ def reset_model(model):
     model.reset()
     if model.act_recovery is not None:
         model.act_recovery.reset()
+    if model.act_press_oracle is not None:
+        model.act_press_oracle.reset()
 
 
 def get_episode_metrics(model):
-    if model.act_recovery is None:
-        return {"contact_plateau_recovery": {"enabled": False}}
-    return {"contact_plateau_recovery": model.act_recovery.metrics()}
+    return {
+        "contact_plateau_recovery": (
+            {"enabled": False}
+            if model.act_recovery is None
+            else model.act_recovery.metrics()
+        ),
+        "proximity_press_oracle": (
+            {"enabled": False}
+            if model.act_press_oracle is None
+            else model.act_press_oracle.metrics()
+        ),
+    }

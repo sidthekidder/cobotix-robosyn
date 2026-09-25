@@ -37,6 +37,13 @@ act_recovery_min_press_depth_m: 0.0011
 act_recovery_press_epsilon_m: 0.0001
 act_recovery_cooldown_steps: 25
 act_recovery_max_replans: 2
+act_press_oracle_enabled: false
+act_press_oracle_min_step: 35
+act_press_oracle_target_plan_step: 49
+act_press_oracle_trigger_max_joint_error_rad: 0.45
+act_press_oracle_interpolation_steps: 12
+act_press_oracle_hold_steps: 8
+act_press_oracle_telemetry_stride: 2
 state_obs_path: robot/qpos
 strict_action_dim: true
 image_key_map:

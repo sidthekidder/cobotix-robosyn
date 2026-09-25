@@ -979,6 +979,22 @@ def main():
             "act_recovery_max_replans": config.get(
                 "act_recovery_max_replans"
             ),
+            "act_press_oracle_enabled": config.get(
+                "act_press_oracle_enabled", False
+            ),
+            "act_press_oracle_min_step": config.get("act_press_oracle_min_step"),
+            "act_press_oracle_target_plan_step": config.get(
+                "act_press_oracle_target_plan_step"
+            ),
+            "act_press_oracle_trigger_max_joint_error_rad": config.get(
+                "act_press_oracle_trigger_max_joint_error_rad"
+            ),
+            "act_press_oracle_interpolation_steps": config.get(
+                "act_press_oracle_interpolation_steps"
+            ),
+            "act_press_oracle_hold_steps": config.get(
+                "act_press_oracle_hold_steps"
+            ),
             "episode_count": max_episodes,
             "timeout_action_steps": max_env_steps,
             "seed": seed,
