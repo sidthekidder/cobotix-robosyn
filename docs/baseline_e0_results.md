@@ -43,8 +43,36 @@ Position alone did not explain the failures in this sample. Success by broad bin
 episodes respectively. Treat those rates as hypotheses for stratified follow-up, not
 stable effects.
 
+## Unfiltered challenge-style baseline
+
+After fixing boolean CLI parsing so `--eval_expert_check false` actually disables
+the filter, the same released checkpoint was evaluated on the first 100 sampled
+scenes from candidate RNG seed 0. Every sampled scene counted.
+
+- Success: 51/100 (51.0%)
+- 95% Wilson interval: 41.3%–60.6%
+- Mean action steps: 203.48 of 361
+- Mean inference latency: 43.32 ms on the RTX 4090
+- Expert filter: disabled; 100 candidates sampled and 100 evaluated
+
+Of the 49 failures, 40 displaced the bell by less than 1.5 mm, 4 reached
+1.5–4.0 mm, and 5 stopped at 4.0–4.8 mm. Successful trajectories had a median
+right-arm path of 0.53 m, compared with 1.70 m for failures.
+
+The larger unfiltered sample reveals a strong workspace-edge effect. Success was
+12/39 (30.8%) for bell x positions at or above 0.70 m and 5/26 (19.2%) for y
+positions at or above 0.15 m. Central bins reached 60–79%. These are broad
+one-dimensional bins rather than a causal model, but they justify stratified
+coverage analysis and targeted data balancing.
+
+The 51% estimate is above the organizers' released 37% ACT result. The released
+number may use different seeds, environment state, or evaluation revisions, so
+the gap should be treated as a reproducibility question rather than an improvement
+claim.
+
 ## Next experiment
 
-Run the same seeds with `ACT_N_ACTION_STEPS` set to 5, 10, 25, and 50. Compare
-success, inference calls, press depth, and right-arm path length. Then run an
-unfiltered 100-episode baseline to reproduce the organizers' evaluation protocol.
+Run fixed, stratified scene sets with `ACT_N_ACTION_STEPS` set to 5, 10, 25, and
+50. Compare success, inference calls, press depth, and right-arm path length,
+with separate reporting for central and workspace-edge scenes. Then audit and
+rebalance demonstration coverage in the hard x/y regions before retraining.
