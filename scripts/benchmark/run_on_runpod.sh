@@ -7,7 +7,7 @@ Usage:
   scripts/benchmark/run_on_runpod.sh \
     --target POD_USER@ssh.runpod.io \
     --key /path/to/private_key \
-    [--episodes 30] [--seed 0] [--port 22] [--run-id NAME] [--dry-run]
+    [--episodes 50] [--seed 0] [--port 22] [--run-id NAME] [--dry-run]
 
 The script uploads the committed Git revision, runs the pinned ACT benchmark,
 and downloads benchmark_runs/NAME into artifacts/benchmarks/NAME.
@@ -16,7 +16,7 @@ EOF
 
 target=""
 key_path=""
-episodes=30
+episodes=50
 seed=0
 port=22
 run_id="click_bell_act_$(date -u +%Y%m%dT%H%M%SZ)"

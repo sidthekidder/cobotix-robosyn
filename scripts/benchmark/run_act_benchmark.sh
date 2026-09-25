@@ -13,7 +13,7 @@ EMBODICHAIN_DIR="$WORKSPACE_ROOT/EmbodiChain"
 
 TASK="${TASK:-click_bell}"
 SETTING="${SETTING:-random}"
-EPISODES="${EPISODES:-30}"
+EPISODES="${EPISODES:-50}"
 SEED="${SEED:-0}"
 GPU_ID="${GPU_ID:-0}"
 RUN_ID="${RUN_ID:-${TASK}_act_$(date -u +%Y%m%dT%H%M%SZ)}"

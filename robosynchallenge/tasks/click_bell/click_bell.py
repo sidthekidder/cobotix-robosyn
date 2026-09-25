@@ -47,6 +47,79 @@ class ClickBellEnv(EmbodiedEnv):
         self._max_press_depth = torch.zeros(
             self.num_envs, dtype=torch.float32, device=self.device
         )
+        self._left_arm_joint_ids = self.robot.get_joint_ids(
+            name="left_arm", remove_mimic=True
+        )
+        self._right_arm_joint_ids = self.robot.get_joint_ids(
+            name="right_arm", remove_mimic=True
+        )
+        self._initialize_episode_diagnostics()
+
+    def _initialize_episode_diagnostics(self):
+        """Capture an episode's initial state for read-only benchmark metrics."""
+        qpos = self.robot.get_qpos().detach()
+        left_eef = self.robot.get_link_pose("left_link6", to_matrix=True)[:, :3, 3]
+        right_eef = self.robot.get_link_pose("right_link6", to_matrix=True)[:, :3, 3]
+        button = self.sim.get_articulation("button")
+        button_base = button.get_link_pose("button_base", to_matrix=True)[:, :3, 3]
+
+        self._initial_left_arm_qpos = qpos[:, self._left_arm_joint_ids].clone()
+        self._initial_right_arm_qpos = qpos[:, self._right_arm_joint_ids].clone()
+        self._max_left_arm_joint_delta = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        self._max_right_arm_joint_delta = torch.zeros_like(
+            self._max_left_arm_joint_delta
+        )
+        self._left_eef_path_length = torch.zeros_like(self._max_left_arm_joint_delta)
+        self._right_eef_path_length = torch.zeros_like(self._max_left_arm_joint_delta)
+        self._previous_left_eef_position = left_eef.clone()
+        self._previous_right_eef_position = right_eef.clone()
+        self._minimum_left_eef_to_button = torch.full_like(
+            self._max_left_arm_joint_delta, torch.inf
+        )
+        self._minimum_right_eef_to_button = torch.full_like(
+            self._max_left_arm_joint_delta, torch.inf
+        )
+        self._button_base_position = button_base.clone()
+
+    def _update_episode_diagnostics(self, button):
+        """Update arm-use and geometric diagnostics after a simulator step."""
+        qpos = self.robot.get_qpos().detach()
+        left_eef = self.robot.get_link_pose("left_link6", to_matrix=True)[:, :3, 3]
+        right_eef = self.robot.get_link_pose("right_link6", to_matrix=True)[:, :3, 3]
+        button_cover = button.get_link_pose("button_cover", to_matrix=True)[:, :3, 3]
+
+        left_delta = torch.amax(
+            torch.abs(qpos[:, self._left_arm_joint_ids] - self._initial_left_arm_qpos),
+            dim=-1,
+        )
+        right_delta = torch.amax(
+            torch.abs(qpos[:, self._right_arm_joint_ids] - self._initial_right_arm_qpos),
+            dim=-1,
+        )
+        self._max_left_arm_joint_delta = torch.maximum(
+            self._max_left_arm_joint_delta, left_delta
+        )
+        self._max_right_arm_joint_delta = torch.maximum(
+            self._max_right_arm_joint_delta, right_delta
+        )
+        self._left_eef_path_length += torch.linalg.norm(
+            left_eef - self._previous_left_eef_position, dim=-1
+        )
+        self._right_eef_path_length += torch.linalg.norm(
+            right_eef - self._previous_right_eef_position, dim=-1
+        )
+        self._previous_left_eef_position = left_eef.clone()
+        self._previous_right_eef_position = right_eef.clone()
+        self._minimum_left_eef_to_button = torch.minimum(
+            self._minimum_left_eef_to_button,
+            torch.linalg.norm(left_eef - button_cover, dim=-1),
+        )
+        self._minimum_right_eef_to_button = torch.minimum(
+            self._minimum_right_eef_to_button,
+            torch.linalg.norm(right_eef - button_cover, dim=-1),
+        )
     def create_demo_action_list(self, *args, **kwargs):
         """
         Create a demonstration action list for the current task.
@@ -140,6 +213,7 @@ class ClickBellEnv(EmbodiedEnv):
         press_depth = -button_qpos[:, 0]
         movement_threshold = 0.0048
         self._max_press_depth = torch.maximum(self._max_press_depth, press_depth)
+        self._update_episode_diagnostics(button)
         current_success = press_depth >= movement_threshold
 
         # 粘滞锁存：回合内任意一步按到位即记为成功
@@ -164,6 +238,13 @@ class ClickBellEnv(EmbodiedEnv):
             "max_press_depth_m": self._max_press_depth.clone(),
             "final_press_depth_m": final_press_depth.clone(),
             "movement_threshold_m": 0.0048,
+            "button_base_position_m": self._button_base_position.clone(),
+            "minimum_left_eef_to_button_m": self._minimum_left_eef_to_button.clone(),
+            "minimum_right_eef_to_button_m": self._minimum_right_eef_to_button.clone(),
+            "left_eef_path_length_m": self._left_eef_path_length.clone(),
+            "right_eef_path_length_m": self._right_eef_path_length.clone(),
+            "max_left_arm_joint_delta_rad": self._max_left_arm_joint_delta.clone(),
+            "max_right_arm_joint_delta_rad": self._max_right_arm_joint_delta.clone(),
         }
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
@@ -177,6 +258,7 @@ class ClickBellEnv(EmbodiedEnv):
         )
         self._success_flag[reset_ids] = False
         self._max_press_depth[reset_ids] = 0.0
+        self._initialize_episode_diagnostics()
 
         return obs, info
 
