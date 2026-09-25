@@ -195,7 +195,11 @@ class ProximityPressOracle:
         current_action = self._current_action(task_env)
         current_right = current_action[self._right_action_indices]
         joint_error = torch.abs(current_right - self._target_right_qpos)
-        current_pose = task_env.robot.get_link_pose("right_link6", to_matrix=True)[0]
+        # Compare FK poses in the same robot-local frame.  get_link_pose() is in
+        # the arena/world frame and cannot be compared directly with compute_fk().
+        current_pose = task_env.robot.compute_fk(
+            name="right_arm", qpos=current_right.unsqueeze(0), to_matrix=True
+        )[0]
         delta_rotation = current_pose[:3, :3].T @ self._target_eef_pose[:3, :3]
         cos_angle = torch.clamp((torch.trace(delta_rotation) - 1.0) / 2.0, -1.0, 1.0)
         diagnostics = task_env.get_episode_diagnostics()
