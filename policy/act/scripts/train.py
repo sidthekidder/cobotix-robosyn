@@ -105,7 +105,7 @@ def _legacy_aliases_for_dataset(dataset):
     return aliases
 
 
-def _load_episode_weights(path):
+def _load_sampling_weights(path):
     if path is None:
         return None
     payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
@@ -116,13 +116,60 @@ def _load_episode_weights(path):
     }
     if default_weight <= 0 or any(weight <= 0 for weight in episode_weights.values()):
         raise ValueError("All sampling weights must be positive.")
-    return {"default_weight": default_weight, "episode_weights": episode_weights}
+    frame_ranges = []
+    for index, rule in enumerate(payload.get("frame_ranges", [])):
+        start = int(rule["start_frame"])
+        end = int(rule["end_frame"])
+        weight = float(rule["weight"])
+        if start < 0 or end < start or weight <= 0:
+            raise ValueError(f"Invalid frame_ranges rule {index}: {rule}")
+        episodes = rule.get("episode_indices")
+        if episodes is not None:
+            episodes = {int(episode_index) for episode_index in episodes}
+        frame_ranges.append(
+            {
+                "start_frame": start,
+                "end_frame": end,
+                "weight": weight,
+                "episode_indices": episodes,
+            }
+        )
+    combine = payload.get("combine", "multiply")
+    if combine not in {"multiply", "max"}:
+        raise ValueError("Sampling-plan combine must be 'multiply' or 'max'.")
+    return {
+        "default_weight": default_weight,
+        "episode_weights": episode_weights,
+        "frame_ranges": frame_ranges,
+        "combine": combine,
+    }
 
 
-def _frame_episode_indices(dataset):
+def _frame_metadata(dataset):
     base_dataset = getattr(dataset, "_base_dataset", dataset)
-    values = base_dataset.hf_dataset["episode_index"]
-    return [int(value.item() if hasattr(value, "item") else value) for value in values]
+    episodes = base_dataset.hf_dataset["episode_index"]
+    frames = base_dataset.hf_dataset["frame_index"]
+
+    def scalar(value):
+        return int(value.item() if hasattr(value, "item") else value)
+
+    return [(scalar(episode), scalar(frame)) for episode, frame in zip(episodes, frames)]
+
+
+def _combine_weight(left, right, mode):
+    return left * right if mode == "multiply" else max(left, right)
+
+
+def _sampling_weight(episode_index, frame_index, plan):
+    default_weight = plan["default_weight"]
+    weight = plan["episode_weights"].get(episode_index, default_weight)
+    for rule in plan["frame_ranges"]:
+        selected_episodes = rule["episode_indices"]
+        if selected_episodes is not None and episode_index not in selected_episodes:
+            continue
+        if rule["start_frame"] <= frame_index <= rule["end_frame"]:
+            weight = _combine_weight(weight, rule["weight"], plan["combine"])
+    return weight
 
 
 def _patch_lerobot_dataset_factory(
@@ -151,11 +198,9 @@ def _patch_lerobot_dataset_factory(
 
     def make_dataloader(dataset, *args, **kwargs):
         if dataset is patched_state["dataset"] and sampling_weights is not None:
-            default_weight = sampling_weights["default_weight"]
-            episode_weights = sampling_weights["episode_weights"]
             frame_weights = [
-                episode_weights.get(episode_index, default_weight)
-                for episode_index in _frame_episode_indices(dataset)
+                _sampling_weight(episode_index, frame_index, sampling_weights)
+                for episode_index, frame_index in _frame_metadata(dataset)
             ]
             kwargs["shuffle"] = False
             kwargs["sampler"] = torch.utils.data.WeightedRandomSampler(
@@ -165,11 +210,12 @@ def _patch_lerobot_dataset_factory(
                 generator=torch.Generator().manual_seed(sampler_seed),
             )
             weighted_frames = sum(
-                weight != default_weight for weight in frame_weights
+                weight != sampling_weights["default_weight"] for weight in frame_weights
             )
             print(
-                "[ACT train] Weighted episode sampling: "
-                f"{weighted_frames}/{len(frame_weights)} frames have custom weights."
+                "[ACT train] Weighted sampling: "
+                f"{weighted_frames}/{len(frame_weights)} frames have custom weights; "
+                f"combine={sampling_weights['combine']}."
             )
         elif distributed_context is not None:
             rank, world_size, _ = distributed_context
@@ -225,7 +271,10 @@ def parse_args():
     )
     parser.add_argument(
         "--episode-weights-json",
-        help="JSON sampling plan with default_weight and episode_weights fields.",
+        help=(
+            "JSON sampling plan with episode_weights and optional frame_ranges. "
+            "The legacy option name is retained for compatibility."
+        ),
     )
     parser.add_argument("--use-amp", action="store_true")
     parser.add_argument("--wandb", action="store_true")
@@ -246,7 +295,7 @@ def main():
         format="%(asctime)s %(levelname)s %(message)s",
     )
     args = parse_args()
-    sampling_weights = _load_episode_weights(args.episode_weights_json)
+    sampling_weights = _load_sampling_weights(args.episode_weights_json)
     if args.distributed and sampling_weights is not None:
         raise ValueError("Weighted episode sampling currently supports one training process.")
     distributed_context = None
