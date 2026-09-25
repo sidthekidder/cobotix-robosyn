@@ -4,6 +4,7 @@
 import argparse
 import copy
 import json
+import logging
 import os
 import shutil
 from pathlib import Path
@@ -240,6 +241,10 @@ def parse_args():
 
 
 def main():
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+    )
     args = parse_args()
     sampling_weights = _load_episode_weights(args.episode_weights_json)
     if args.distributed and sampling_weights is not None:
