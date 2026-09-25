@@ -17,7 +17,15 @@ EPISODES="${EPISODES:-50}"
 SEED="${SEED:-0}"
 GPU_ID="${GPU_ID:-0}"
 ACT_N_ACTION_STEPS="${ACT_N_ACTION_STEPS:-}"
+ACT_RECOVERY_ENABLED="${ACT_RECOVERY_ENABLED:-false}"
+ACT_RECOVERY_MIN_STEP="${ACT_RECOVERY_MIN_STEP:-60}"
+ACT_RECOVERY_PLATEAU_STEPS="${ACT_RECOVERY_PLATEAU_STEPS:-10}"
+ACT_RECOVERY_MIN_PRESS_DEPTH_M="${ACT_RECOVERY_MIN_PRESS_DEPTH_M:-0.0011}"
+ACT_RECOVERY_PRESS_EPSILON_M="${ACT_RECOVERY_PRESS_EPSILON_M:-0.0001}"
+ACT_RECOVERY_COOLDOWN_STEPS="${ACT_RECOVERY_COOLDOWN_STEPS:-25}"
+ACT_RECOVERY_MAX_REPLANS="${ACT_RECOVERY_MAX_REPLANS:-2}"
 EVAL_EXPERT_CHECK="${EVAL_EXPERT_CHECK:-true}"
+EVAL_EPISODE_SEEDS="${EVAL_EPISODE_SEEDS:-}"
 RUN_ID="${RUN_ID:-${TASK}_act_$(date -u +%Y%m%dT%H%M%SZ)}"
 CHECKPOINT_REPO="${CHECKPOINT_REPO:-RoboSynChallenge/ACT_sim_click_bell}"
 CHECKPOINT_REVISION="${CHECKPOINT_REVISION:-677e65fbb15974024ff840893496197ef7db26d4}"
@@ -38,6 +46,36 @@ fi
 if [[ "$EVAL_EXPERT_CHECK" != "true" && "$EVAL_EXPERT_CHECK" != "false" ]]; then
     echo "EVAL_EXPERT_CHECK must be true or false." >&2
     exit 2
+fi
+if [[ "$ACT_RECOVERY_ENABLED" != "true" && "$ACT_RECOVERY_ENABLED" != "false" ]]; then
+    echo "ACT_RECOVERY_ENABLED must be true or false." >&2
+    exit 2
+fi
+for value_name in ACT_RECOVERY_MIN_STEP ACT_RECOVERY_PLATEAU_STEPS ACT_RECOVERY_MAX_REPLANS; do
+    value="${!value_name}"
+    if ! [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+        echo "$value_name must be a positive integer, got: $value" >&2
+        exit 2
+    fi
+done
+if ! [[ "$ACT_RECOVERY_COOLDOWN_STEPS" =~ ^[0-9]+$ ]]; then
+    echo "ACT_RECOVERY_COOLDOWN_STEPS must be a non-negative integer." >&2
+    exit 2
+fi
+if [[ -n "$EVAL_EPISODE_SEEDS" ]]; then
+    python3 - "$EVAL_EPISODE_SEEDS" "$EPISODES" <<'PY'
+import json
+import sys
+
+seeds = json.loads(sys.argv[1])
+episodes = int(sys.argv[2])
+if not isinstance(seeds, list) or not all(isinstance(seed, int) for seed in seeds):
+    raise SystemExit("EVAL_EPISODE_SEEDS must be a JSON list of integers.")
+if len(seeds) != episodes:
+    raise SystemExit(
+        f"EVAL_EPISODE_SEEDS contains {len(seeds)} seeds, expected {episodes}."
+    )
+PY
 fi
 
 RUN_DIR="$REPO_ROOT/benchmark_runs/$RUN_ID"
@@ -108,7 +146,15 @@ CHECKPOINT_REPO="$CHECKPOINT_REPO" \
 CHECKPOINT_REVISION="$CHECKPOINT_REVISION" \
 TASK="$TASK" SETTING="$SETTING" EPISODES="$EPISODES" SEED="$SEED" \
 ACT_N_ACTION_STEPS="$ACT_N_ACTION_STEPS" \
+ACT_RECOVERY_ENABLED="$ACT_RECOVERY_ENABLED" \
+ACT_RECOVERY_MIN_STEP="$ACT_RECOVERY_MIN_STEP" \
+ACT_RECOVERY_PLATEAU_STEPS="$ACT_RECOVERY_PLATEAU_STEPS" \
+ACT_RECOVERY_MIN_PRESS_DEPTH_M="$ACT_RECOVERY_MIN_PRESS_DEPTH_M" \
+ACT_RECOVERY_PRESS_EPSILON_M="$ACT_RECOVERY_PRESS_EPSILON_M" \
+ACT_RECOVERY_COOLDOWN_STEPS="$ACT_RECOVERY_COOLDOWN_STEPS" \
+ACT_RECOVERY_MAX_REPLANS="$ACT_RECOVERY_MAX_REPLANS" \
 EVAL_EXPERT_CHECK="$EVAL_EXPERT_CHECK" \
+EVAL_EPISODE_SEEDS="$EVAL_EPISODE_SEEDS" \
 "$PYTHON_BIN" - "$RUN_DIR/run_manifest.json" <<'PY'
 import json
 import os
@@ -135,7 +181,21 @@ manifest = {
         if os.environ.get("ACT_N_ACTION_STEPS")
         else None
     ),
+    "act_recovery": {
+        "enabled": os.environ["ACT_RECOVERY_ENABLED"] == "true",
+        "min_step": int(os.environ["ACT_RECOVERY_MIN_STEP"]),
+        "plateau_steps": int(os.environ["ACT_RECOVERY_PLATEAU_STEPS"]),
+        "min_press_depth_m": float(os.environ["ACT_RECOVERY_MIN_PRESS_DEPTH_M"]),
+        "press_epsilon_m": float(os.environ["ACT_RECOVERY_PRESS_EPSILON_M"]),
+        "cooldown_steps": int(os.environ["ACT_RECOVERY_COOLDOWN_STEPS"]),
+        "max_replans": int(os.environ["ACT_RECOVERY_MAX_REPLANS"]),
+    },
     "eval_expert_check": os.environ["EVAL_EXPERT_CHECK"] == "true",
+    "eval_episode_seeds": (
+        json.loads(os.environ["EVAL_EPISODE_SEEDS"])
+        if os.environ.get("EVAL_EPISODE_SEEDS")
+        else None
+    ),
     "source_revision": os.environ["SOURCE_REVISION"],
     "embodichain_revision": os.environ["EMBODICHAIN_REVISION"],
     "checkpoint_repo": os.environ["CHECKPOINT_REPO"],
@@ -155,6 +215,20 @@ export EMBODICHAIN_ROOT="$EMBODICHAIN_DIR"
 act_overrides=()
 if [[ -n "$ACT_N_ACTION_STEPS" ]]; then
     act_overrides+=(--n_action_steps "$ACT_N_ACTION_STEPS")
+fi
+if [[ "$ACT_RECOVERY_ENABLED" == "true" ]]; then
+    act_overrides+=(
+        --act_recovery_enabled true
+        --act_recovery_min_step "$ACT_RECOVERY_MIN_STEP"
+        --act_recovery_plateau_steps "$ACT_RECOVERY_PLATEAU_STEPS"
+        --act_recovery_min_press_depth_m "$ACT_RECOVERY_MIN_PRESS_DEPTH_M"
+        --act_recovery_press_epsilon_m "$ACT_RECOVERY_PRESS_EPSILON_M"
+        --act_recovery_cooldown_steps "$ACT_RECOVERY_COOLDOWN_STEPS"
+        --act_recovery_max_replans "$ACT_RECOVERY_MAX_REPLANS"
+    )
+fi
+if [[ -n "$EVAL_EPISODE_SEEDS" ]]; then
+    act_overrides+=(--eval_episode_seeds "$EVAL_EPISODE_SEEDS")
 fi
 
 bash policy/act/eval.sh \

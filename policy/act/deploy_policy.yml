@@ -21,6 +21,7 @@ eval_video_obs_keys:
   - cam_left_wrist
 eval_reset_sync_steps: 1
 eval_expert_check: true
+eval_episode_seeds: null
 
 # ------------------------------------------------------------------
 # ACT Policy parameters used by get_model()
@@ -28,6 +29,13 @@ eval_expert_check: true
 checkpoint_path: null
 act_step: 10
 n_action_steps: null
+act_recovery_enabled: false
+act_recovery_min_step: 60
+act_recovery_plateau_steps: 10
+act_recovery_min_press_depth_m: 0.0011
+act_recovery_press_epsilon_m: 0.0001
+act_recovery_cooldown_steps: 25
+act_recovery_max_replans: 2
 state_obs_path: robot/qpos
 strict_action_dim: true
 image_key_map:

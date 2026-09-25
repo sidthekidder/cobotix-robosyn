@@ -13,6 +13,26 @@ import torch
 from lerobot.configs.policies import PreTrainedConfig
 from lerobot.policies.act.modeling_act import ACTPolicy
 from policy.inference_timing import finish_inference, start_inference
+from policy.act.recovery import ContactPlateauRecovery
+
+
+def _as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    return bool(value)
+
+
+def _metric_scalar(value):
+    if isinstance(value, torch.Tensor):
+        return float(value.detach().reshape(-1)[0].cpu())
+    array = np.asarray(value)
+    return float(array.reshape(-1)[0])
 
 
 def get_model(usr_args):
@@ -64,6 +84,20 @@ def get_model(usr_args):
     policy.strict_action_dim = bool(usr_args.get("strict_action_dim", True))
     policy.act_image_keys = image_keys
     policy.image_key_map = image_key_map
+    policy.act_recovery = None
+    if _as_bool(usr_args.get("act_recovery_enabled", False)):
+        policy.act_recovery = ContactPlateauRecovery(
+            min_step=int(usr_args.get("act_recovery_min_step", 60)),
+            plateau_steps=int(usr_args.get("act_recovery_plateau_steps", 10)),
+            min_press_depth_m=float(
+                usr_args.get("act_recovery_min_press_depth_m", 0.0011)
+            ),
+            press_epsilon_m=float(
+                usr_args.get("act_recovery_press_epsilon_m", 0.0001)
+            ),
+            cooldown_steps=int(usr_args.get("act_recovery_cooldown_steps", 25)),
+            max_replans=int(usr_args.get("act_recovery_max_replans", 2)),
+        )
 
     if policy.act_step <= 0:
         raise ValueError(f"act_step must be positive, got {policy.act_step}.")
@@ -129,6 +163,20 @@ def eval(env, model, obs):
         final_obs, reward, terminated, truncated, info = env.step(action_tensor)
         if env.get_wrapper_attr("is_task_success")():
             break
+        if model.act_recovery is not None:
+            diagnostics = env.unwrapped.get_episode_diagnostics()
+            queue_size = len(model._action_queue)
+            should_replan = model.act_recovery.observe(
+                max_press_depth_m=_metric_scalar(
+                    diagnostics["max_press_depth_m"]
+                ),
+                success_depth_m=_metric_scalar(
+                    diagnostics["movement_threshold_m"]
+                ),
+                queued_actions=queue_size,
+            )
+            if should_replan:
+                model._action_queue.clear()
         if isinstance(truncated, torch.Tensor):
             is_truncated = truncated.any().item()
         elif isinstance(truncated, np.ndarray):
@@ -143,3 +191,11 @@ def eval(env, model, obs):
 
 def reset_model(model):
     model.reset()
+    if model.act_recovery is not None:
+        model.act_recovery.reset()
+
+
+def get_episode_metrics(model):
+    if model.act_recovery is None:
+        return {"contact_plateau_recovery": {"enabled": False}}
+    return {"contact_plateau_recovery": model.act_recovery.metrics()}

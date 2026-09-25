@@ -668,6 +668,22 @@ def main():
     max_episodes = config.get("max_episodes")
     seed = config.get("seed")
     fixed_episode_seed = config.get("eval_fixed_episode_seed")
+    configured_episode_seeds = config.get("eval_episode_seeds")
+    if configured_episode_seeds is not None:
+        if fixed_episode_seed is not None:
+            raise ValueError(
+                "eval_episode_seeds and eval_fixed_episode_seed are mutually exclusive."
+            )
+        if not isinstance(configured_episode_seeds, (list, tuple)):
+            raise TypeError("eval_episode_seeds must be a list of integer seeds.")
+        episode_seeds = [int(item) for item in configured_episode_seeds]
+        if len(episode_seeds) != max_episodes:
+            raise ValueError(
+                "eval_episode_seeds length must equal max_episodes: "
+                f"{len(episode_seeds)} != {max_episodes}."
+            )
+    else:
+        episode_seeds = None
     headless = config.get("headless")
     expert_check = _as_bool(
         config.get("eval_expert_check", True), "eval_expert_check"
@@ -769,11 +785,12 @@ def main():
                     "expert/action space."
                 )
 
-            ep_seed = (
-                int(fixed_episode_seed)
-                if fixed_episode_seed is not None
-                else int(rng.randint(0, 2**31 - 1))
-            )
+            if episode_seeds is not None:
+                ep_seed = episode_seeds[episode]
+            elif fixed_episode_seed is not None:
+                ep_seed = int(fixed_episode_seed)
+            else:
+                ep_seed = int(rng.randint(0, 2**31 - 1))
             candidate_seed_attempts += 1
             current_episode_seed_attempts += 1
             candidate_index = candidate_seed_attempts - 1
@@ -804,11 +821,10 @@ def main():
                         f"({expert_result['reason']}, "
                         f"planned_steps={expert_result['expert_plan_steps']})"
                     )
-                    if fixed_episode_seed is not None:
+                    if fixed_episode_seed is not None or episode_seeds is not None:
                         raise RuntimeError(
-                            f"Fixed episode seed {ep_seed} failed the expert "
-                            "feasibility check; no replacement seed can be "
-                            "selected while eval_fixed_episode_seed is set."
+                            f"Explicit episode seed {ep_seed} failed the expert "
+                            "feasibility check; no replacement seed can be selected."
                         )
                     continue
                 print(
@@ -872,6 +888,12 @@ def main():
             success_count += int(episode_success)
             effective_steps = env_steps if episode_success else max_env_steps
             diagnostics = collect_episode_diagnostics(env)
+            policy_metrics_getter = getattr(policy_pkg, "get_episode_metrics", None)
+            policy_metrics = (
+                to_json_value(policy_metrics_getter(model))
+                if callable(policy_metrics_getter)
+                else {}
+            )
             action_steps.append(effective_steps)
             all_inference_times.extend(inference_times)
             episode_inference_totals.append(sum(inference_times))
@@ -884,6 +906,7 @@ def main():
                     "success": episode_success,
                     "action_steps": effective_steps,
                     "diagnostics": diagnostics,
+                    "policy_metrics": policy_metrics,
                     "expert_plan_steps": (
                         expert_result["expert_plan_steps"]
                         if expert_result is not None
@@ -936,10 +959,28 @@ def main():
             "dp_num_inference_steps": config.get("dp_num_inference_steps"),
             "act_step": config.get("act_step"),
             "n_action_steps": config.get("n_action_steps"),
+            "act_recovery_enabled": config.get("act_recovery_enabled", False),
+            "act_recovery_min_step": config.get("act_recovery_min_step"),
+            "act_recovery_plateau_steps": config.get(
+                "act_recovery_plateau_steps"
+            ),
+            "act_recovery_min_press_depth_m": config.get(
+                "act_recovery_min_press_depth_m"
+            ),
+            "act_recovery_press_epsilon_m": config.get(
+                "act_recovery_press_epsilon_m"
+            ),
+            "act_recovery_cooldown_steps": config.get(
+                "act_recovery_cooldown_steps"
+            ),
+            "act_recovery_max_replans": config.get(
+                "act_recovery_max_replans"
+            ),
             "episode_count": max_episodes,
             "timeout_action_steps": max_env_steps,
             "seed": seed,
             "fixed_episode_seed": fixed_episode_seed,
+            "episode_seeds": episode_seeds,
         },
         "inference_timing_scope": (
             "raw observation preprocessing and transfer through executable action; "
