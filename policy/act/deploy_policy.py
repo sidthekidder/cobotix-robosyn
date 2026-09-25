@@ -22,6 +22,14 @@ def get_model(usr_args):
 
     device = usr_args.get("device", usr_args.get("pytorch_device", "cuda"))
     cli_overrides = [f"--device={device}"]
+    n_action_steps = usr_args.get("n_action_steps")
+    if n_action_steps is not None:
+        n_action_steps = int(n_action_steps)
+        if n_action_steps <= 0:
+            raise ValueError(
+                f"n_action_steps must be positive, got {n_action_steps}."
+            )
+        cli_overrides.append(f"--n_action_steps={n_action_steps}")
     try:
         policy = ACTPolicy.from_pretrained(
             checkpoint_path,

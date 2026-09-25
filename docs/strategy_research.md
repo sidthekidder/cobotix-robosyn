@@ -73,13 +73,16 @@ joint displacement, press depth, latency, and video.
 This establishes whether failures are dominated by reach, perception, approach
 height, insufficient press depth, or control oscillation.
 
-### E1 — closed-loop action-chunk sweep
+### E1 — ACT executed-horizon sweep
 
-Evaluate `act_step` values 1, 2, 4, 8, and 16 without retraining. Short chunks
-replan more frequently and may correct hovering or lateral error; long chunks
-reduce inference overhead but commit longer to stale predictions. This is the
-cheapest opportunity for challenge-specific alpha because it tests the control
-loop directly.
+Evaluate `n_action_steps` values 5, 10, 25, and 50 without retraining. The released
+checkpoint predicts 50 actions and executes all 50 before observing again. Shorter
+executed horizons discard the remainder of that action queue and replan from fresh
+images sooner, trading inference cost for recovery from visual and contact error.
+
+Do not sweep `act_step` for this purpose. In this adapter, `act_step` only controls
+how many environment steps are grouped inside one evaluator call; it does not change
+the policy's 50-action queue or replanning cadence.
 
 ### E2 — balanced expert data
 

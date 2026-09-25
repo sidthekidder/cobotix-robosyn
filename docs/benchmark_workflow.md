@@ -8,7 +8,7 @@ is terminated.
 
 - EmbodiChain commit: `9ebee30011f378f94a7cbe78b01d8c2eacba231a`
   (`v0.2.4`)
-- ACT checkpoint: `EDEM-AI/ACT_sim_click_bell`
+- ACT checkpoint: `RoboSynChallenge/ACT_sim_click_bell`
 - Checkpoint revision: `677e65fbb15974024ff840893496197ef7db26d4`
 - Python dependencies: `policy/act/uv.lock`
 - Repository source: the local committed Git revision uploaded by the runner
@@ -45,8 +45,32 @@ scripts/benchmark/run_on_runpod.sh \
   --target POD_USER@ssh.runpod.io \
   --key /absolute/path/to/private_key \
   --episodes 50 \
-  --seed 0
+  --seed 0 \
+  --expert-check true
 ```
+
+`--expert-check true` is useful for debugging policy behavior on scenes where
+the built-in expert can find a trajectory. That score is conditional on the
+feasibility filter and must not be compared directly with the challenge's
+unfiltered headline score. Use `--expert-check false` for an official-style
+benchmark in which every sampled scene counts toward the requested episode
+total.
+
+To test more frequent visual replanning without retraining, override the number
+of predicted actions ACT executes before requesting a new observation:
+
+```bash
+scripts/benchmark/run_on_runpod.sh \
+  --target POD_USER@ssh.runpod.io \
+  --key /absolute/path/to/private_key \
+  --episodes 50 \
+  --seed 0 \
+  --expert-check true \
+  --act-n-action-steps 10
+```
+
+The released checkpoint defaults to 50 executed actions. Keep the candidate
+seed and expert-check setting fixed when comparing action horizons.
 
 The local output is written under `artifacts/benchmarks/<run-id>/` and includes:
 
@@ -58,9 +82,11 @@ The local output is written under `artifacts/benchmarks/<run-id>/` and includes:
   closest end-effector approach, end-effector path length, and maximum button
   depression
 
-The benchmark uses the same seeded candidate sequence every time. RoboSyn's
-expert feasibility filter may skip candidates for which its own planner cannot
-construct a valid trajectory, but accepted policy episodes remain reproducible.
+The benchmark uses the same seeded candidate sequence every time. With the
+expert check enabled, RoboSyn may skip candidates for which its own planner
+cannot construct a valid trajectory. The accepted scene sequence is repeatable,
+although GPU inference and simulation can still produce occasional boundary
+outcome changes.
 
 Terminate the pod only after the local result directory has been inspected.
 

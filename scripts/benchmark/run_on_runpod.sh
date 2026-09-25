@@ -7,7 +7,8 @@ Usage:
   scripts/benchmark/run_on_runpod.sh \
     --target POD_USER@ssh.runpod.io \
     --key /path/to/private_key \
-    [--episodes 50] [--seed 0] [--port 22] [--run-id NAME] [--dry-run]
+    [--episodes 50] [--seed 0] [--port 22] [--run-id NAME] \
+    [--expert-check true|false] [--act-n-action-steps N] [--dry-run]
 
 The script uploads the committed Git revision, runs the pinned ACT benchmark,
 and downloads benchmark_runs/NAME into artifacts/benchmarks/NAME.
@@ -20,6 +21,8 @@ episodes=50
 seed=0
 port=22
 run_id="click_bell_act_$(date -u +%Y%m%dT%H%M%SZ)"
+expert_check=true
+act_n_action_steps=""
 dry_run=0
 
 while (( $# > 0 )); do
@@ -30,6 +33,8 @@ while (( $# > 0 )); do
         --seed) seed="${2:?missing value for --seed}"; shift 2 ;;
         --port) port="${2:?missing value for --port}"; shift 2 ;;
         --run-id) run_id="${2:?missing value for --run-id}"; shift 2 ;;
+        --expert-check) expert_check="${2:?missing value for --expert-check}"; shift 2 ;;
+        --act-n-action-steps) act_n_action_steps="${2:?missing value for --act-n-action-steps}"; shift 2 ;;
         --dry-run) dry_run=1; shift ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown argument: $1" >&2; usage >&2; exit 2 ;;
@@ -54,6 +59,14 @@ if ! [[ "$port" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if ! [[ "$run_id" =~ ^[A-Za-z0-9._-]+$ ]]; then
     echo "--run-id contains unsupported characters." >&2
+    exit 2
+fi
+if [[ "$expert_check" != "true" && "$expert_check" != "false" ]]; then
+    echo "--expert-check must be true or false." >&2
+    exit 2
+fi
+if [[ -n "$act_n_action_steps" ]] && ! [[ "$act_n_action_steps" =~ ^[1-9][0-9]*$ ]]; then
+    echo "--act-n-action-steps must be a positive integer." >&2
     exit 2
 fi
 if (( dry_run == 0 )) && [[ ! -f "$key_path" ]]; then
@@ -84,6 +97,8 @@ Source revision: $SOURCE_REVISION
 Remote target:   $target
 Remote workspace:$REMOTE_WORKSPACE
 Episodes/seed:   $episodes / $seed
+Expert check:    $expert_check
+ACT action steps:${act_n_action_steps:-checkpoint default}
 Local results:   $LOCAL_RUN_DIR
 EOF
     exit 0
@@ -106,9 +121,13 @@ printf '%s\n' "$SOURCE_REVISION" \
     | ssh "${SSH_ARGS[@]}" "$target" "cat > '$REMOTE_REPO/.cobotix-source-revision'"
 
 echo "Running $episodes episodes on Runpod"
+remote_env="RUN_ID='$run_id' EPISODES='$episodes' SEED='$seed' EVAL_EXPERT_CHECK='$expert_check'"
+if [[ -n "$act_n_action_steps" ]]; then
+    remote_env+=" ACT_N_ACTION_STEPS='$act_n_action_steps'"
+fi
 set +e
 ssh "${SSH_ARGS[@]}" "$target" \
-    "cd '$REMOTE_REPO' && RUN_ID='$run_id' EPISODES='$episodes' SEED='$seed' bash scripts/benchmark/run_act_benchmark.sh"
+    "cd '$REMOTE_REPO' && $remote_env bash scripts/benchmark/run_act_benchmark.sh"
 remote_status=$?
 set -e
 

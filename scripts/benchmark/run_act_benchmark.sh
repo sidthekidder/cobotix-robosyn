@@ -16,6 +16,8 @@ SETTING="${SETTING:-random}"
 EPISODES="${EPISODES:-50}"
 SEED="${SEED:-0}"
 GPU_ID="${GPU_ID:-0}"
+ACT_N_ACTION_STEPS="${ACT_N_ACTION_STEPS:-}"
+EVAL_EXPERT_CHECK="${EVAL_EXPERT_CHECK:-true}"
 RUN_ID="${RUN_ID:-${TASK}_act_$(date -u +%Y%m%dT%H%M%SZ)}"
 CHECKPOINT_REPO="${CHECKPOINT_REPO:-RoboSynChallenge/ACT_sim_click_bell}"
 CHECKPOINT_REVISION="${CHECKPOINT_REVISION:-677e65fbb15974024ff840893496197ef7db26d4}"
@@ -27,6 +29,14 @@ if ! [[ "$EPISODES" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if ! [[ "$RUN_ID" =~ ^[A-Za-z0-9._-]+$ ]]; then
     echo "RUN_ID may contain only letters, digits, dots, underscores, and hyphens." >&2
+    exit 2
+fi
+if [[ -n "$ACT_N_ACTION_STEPS" ]] && ! [[ "$ACT_N_ACTION_STEPS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ACT_N_ACTION_STEPS must be a positive integer when set." >&2
+    exit 2
+fi
+if [[ "$EVAL_EXPERT_CHECK" != "true" && "$EVAL_EXPERT_CHECK" != "false" ]]; then
+    echo "EVAL_EXPERT_CHECK must be true or false." >&2
     exit 2
 fi
 
@@ -97,6 +107,8 @@ EMBODICHAIN_REVISION="$EMBODICHAIN_REVISION" \
 CHECKPOINT_REPO="$CHECKPOINT_REPO" \
 CHECKPOINT_REVISION="$CHECKPOINT_REVISION" \
 TASK="$TASK" SETTING="$SETTING" EPISODES="$EPISODES" SEED="$SEED" \
+ACT_N_ACTION_STEPS="$ACT_N_ACTION_STEPS" \
+EVAL_EXPERT_CHECK="$EVAL_EXPERT_CHECK" \
 "$PYTHON_BIN" - "$RUN_DIR/run_manifest.json" <<'PY'
 import json
 import os
@@ -118,6 +130,12 @@ manifest = {
     "setting": os.environ["SETTING"],
     "episodes": int(os.environ["EPISODES"]),
     "seed": int(os.environ["SEED"]),
+    "act_n_action_steps": (
+        int(os.environ["ACT_N_ACTION_STEPS"])
+        if os.environ.get("ACT_N_ACTION_STEPS")
+        else None
+    ),
+    "eval_expert_check": os.environ["EVAL_EXPERT_CHECK"] == "true",
     "source_revision": os.environ["SOURCE_REVISION"],
     "embodichain_revision": os.environ["EMBODICHAIN_REVISION"],
     "checkpoint_repo": os.environ["CHECKPOINT_REPO"],
@@ -134,13 +152,20 @@ export NVIDIA_DRIVER_CAPABILITIES="${NVIDIA_DRIVER_CAPABILITIES:-all}"
 export PYTHON_BIN
 export EMBODICHAIN_ROOT="$EMBODICHAIN_DIR"
 
+act_overrides=()
+if [[ -n "$ACT_N_ACTION_STEPS" ]]; then
+    act_overrides+=(--n_action_steps "$ACT_N_ACTION_STEPS")
+fi
+
 bash policy/act/eval.sh \
     "$TASK" "$SETTING" "$CHECKPOINT_DIR" "$GPU_ID" \
     --max_episodes "$EPISODES" \
     --seed "$SEED" \
+    --eval_expert_check "$EVAL_EXPERT_CHECK" \
     --pytorch_device cuda \
     --headless True \
     --eval_result_dir "$RUN_DIR/eval_result" \
+    "${act_overrides[@]}" \
     2>&1 | tee "$RUN_DIR/evaluation.log"
 
 "$PYTHON_BIN" scripts/benchmark/summarize_eval.py \
