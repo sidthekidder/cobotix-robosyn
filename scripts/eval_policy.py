@@ -106,6 +106,19 @@ def _as_int_or_none(value):
     return int(value)
 
 
+def _as_bool(value, key):
+    """Parse config booleans without treating non-empty strings as true."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized == "true":
+            return True
+        if normalized == "false":
+            return False
+    raise ValueError(f"{key} must be true or false, got {value!r}.")
+
+
 def select_cuda_device(config):
     """Align an unqualified policy CUDA device with the simulator GPU."""
     pytorch_device = str(config.get("pytorch_device", ""))
@@ -656,7 +669,9 @@ def main():
     seed = config.get("seed")
     fixed_episode_seed = config.get("eval_fixed_episode_seed")
     headless = config.get("headless")
-    expert_check = bool(config.get("eval_expert_check", True))
+    expert_check = _as_bool(
+        config.get("eval_expert_check", True), "eval_expert_check"
+    )
     if expert_check:
         max_seed_attempts_per_episode = int(
             config.get("eval_max_seed_attempts_per_episodes", 100)
