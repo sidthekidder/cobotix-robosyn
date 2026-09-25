@@ -82,6 +82,7 @@ class ClickBellEnv(EmbodiedEnv):
             self._max_left_arm_joint_delta, torch.inf
         )
         self._button_base_position = button_base.clone()
+        self._episode_diagnostic_steps = 0
 
     def _update_episode_diagnostics(self, button):
         """Update arm-use and geometric diagnostics after a simulator step."""
@@ -120,6 +121,24 @@ class ClickBellEnv(EmbodiedEnv):
             self._minimum_right_eef_to_button,
             torch.linalg.norm(right_eef - button_cover, dim=-1),
         )
+        self._episode_diagnostic_steps += 1
+
+    def _snapshot_episode_diagnostics(self) -> Dict[str, torch.Tensor | float]:
+        """Copy metrics before an autoreset replaces the terminal state."""
+        button = self.sim.get_articulation("button")
+        final_press_depth = -button.get_qpos()[:, 0]
+        return {
+            "max_press_depth_m": self._max_press_depth.clone(),
+            "final_press_depth_m": final_press_depth.clone(),
+            "movement_threshold_m": 0.0048,
+            "button_base_position_m": self._button_base_position.clone(),
+            "minimum_left_eef_to_button_m": self._minimum_left_eef_to_button.clone(),
+            "minimum_right_eef_to_button_m": self._minimum_right_eef_to_button.clone(),
+            "left_eef_path_length_m": self._left_eef_path_length.clone(),
+            "right_eef_path_length_m": self._right_eef_path_length.clone(),
+            "max_left_arm_joint_delta_rad": self._max_left_arm_joint_delta.clone(),
+            "max_right_arm_joint_delta_rad": self._max_right_arm_joint_delta.clone(),
+        }
     def create_demo_action_list(self, *args, **kwargs):
         """
         Create a demonstration action list for the current task.
@@ -232,22 +251,14 @@ class ClickBellEnv(EmbodiedEnv):
 
     def get_episode_diagnostics(self) -> Dict[str, torch.Tensor | float]:
         """Return read-only contact diagnostics for benchmark reporting."""
-        button = self.sim.get_articulation("button")
-        final_press_depth = -button.get_qpos()[:, 0]
-        return {
-            "max_press_depth_m": self._max_press_depth.clone(),
-            "final_press_depth_m": final_press_depth.clone(),
-            "movement_threshold_m": 0.0048,
-            "button_base_position_m": self._button_base_position.clone(),
-            "minimum_left_eef_to_button_m": self._minimum_left_eef_to_button.clone(),
-            "minimum_right_eef_to_button_m": self._minimum_right_eef_to_button.clone(),
-            "left_eef_path_length_m": self._left_eef_path_length.clone(),
-            "right_eef_path_length_m": self._right_eef_path_length.clone(),
-            "max_left_arm_joint_delta_rad": self._max_left_arm_joint_delta.clone(),
-            "max_right_arm_joint_delta_rad": self._max_right_arm_joint_delta.clone(),
-        }
+        if getattr(self, "_episode_diagnostic_steps", 0) > 0:
+            return self._snapshot_episode_diagnostics()
+        previous = getattr(self, "_last_episode_diagnostics", None)
+        return previous if previous is not None else self._snapshot_episode_diagnostics()
 
     def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None):
+        if getattr(self, "_episode_diagnostic_steps", 0) > 0:
+            self._last_episode_diagnostics = self._snapshot_episode_diagnostics()
         obs, info = super().reset(seed=seed, options=options)
 
         if options is None:

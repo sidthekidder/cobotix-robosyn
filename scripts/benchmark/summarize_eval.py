@@ -42,6 +42,13 @@ def fmt_meters(value) -> str:
     return f"{float(value):.3f} m" if value is not None else "n/a"
 
 
+def flatten_single_environment(value):
+    """Unwrap the leading environment dimension used by vectorized tasks."""
+    if isinstance(value, list) and len(value) == 1 and isinstance(value[0], list):
+        return value[0]
+    return value
+
+
 def infer_active_arm(diagnostics: dict) -> str:
     """Describe arm use from raw motion metrics without hiding their values."""
     left_path = float(diagnostics.get("left_eef_path_length_m", 0.0))
@@ -86,7 +93,9 @@ def build_summary(metrics: dict, metrics_path: Path) -> str:
     for episode in episodes:
         diagnostics = episode.get("diagnostics") or {}
         max_depth = diagnostics.get("max_press_depth_m")
-        button_position = diagnostics.get("button_base_position_m")
+        button_position = flatten_single_environment(
+            diagnostics.get("button_base_position_m")
+        )
         if isinstance(button_position, list) and len(button_position) >= 2:
             position_text = f"{float(button_position[0]):.3f}, {float(button_position[1]):.3f}"
         else:
