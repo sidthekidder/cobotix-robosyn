@@ -3,6 +3,7 @@
 
 import argparse
 import copy
+import json
 import os
 import shutil
 from pathlib import Path
@@ -103,10 +104,35 @@ def _legacy_aliases_for_dataset(dataset):
     return aliases
 
 
-def _patch_lerobot_dataset_factory(distributed_context=None):
+def _load_episode_weights(path):
+    if path is None:
+        return None
+    payload = json.loads(Path(path).expanduser().read_text(encoding="utf-8"))
+    default_weight = float(payload.get("default_weight", 1.0))
+    episode_weights = {
+        int(episode_index): float(weight)
+        for episode_index, weight in payload.get("episode_weights", {}).items()
+    }
+    if default_weight <= 0 or any(weight <= 0 for weight in episode_weights.values()):
+        raise ValueError("All sampling weights must be positive.")
+    return {"default_weight": default_weight, "episode_weights": episode_weights}
+
+
+def _frame_episode_indices(dataset):
+    base_dataset = getattr(dataset, "_base_dataset", dataset)
+    values = base_dataset.hf_dataset["episode_index"]
+    return [int(value.item() if hasattr(value, "item") else value) for value in values]
+
+
+def _patch_lerobot_dataset_factory(
+    distributed_context=None,
+    sampling_weights=None,
+    sampler_seed=0,
+):
     import lerobot.scripts.train as train_module
 
     original_make_dataset = train_module.make_dataset
+    patched_state = {"dataset": None}
 
     def make_dataset_with_legacy_aliases(cfg):
         dataset = original_make_dataset(cfg)
@@ -116,14 +142,36 @@ def _patch_lerobot_dataset_factory(distributed_context=None):
             for alias_key, source_key in aliases.items():
                 print(f"  {source_key} -> {alias_key}")
             dataset = _AliasedLeRobotDataset(dataset, aliases)
+        patched_state["dataset"] = dataset
         return dataset
 
     train_module.make_dataset = make_dataset_with_legacy_aliases
-    if distributed_context is not None:
-        original_make_policy = train_module.make_policy
-        rank, world_size, local_rank = distributed_context
-        original_dataloader = torch.utils.data.DataLoader
-        def make_dataloader(dataset, *args, **kwargs):
+    original_dataloader = torch.utils.data.DataLoader
+
+    def make_dataloader(dataset, *args, **kwargs):
+        if dataset is patched_state["dataset"] and sampling_weights is not None:
+            default_weight = sampling_weights["default_weight"]
+            episode_weights = sampling_weights["episode_weights"]
+            frame_weights = [
+                episode_weights.get(episode_index, default_weight)
+                for episode_index in _frame_episode_indices(dataset)
+            ]
+            kwargs["shuffle"] = False
+            kwargs["sampler"] = torch.utils.data.WeightedRandomSampler(
+                frame_weights,
+                num_samples=len(frame_weights),
+                replacement=True,
+                generator=torch.Generator().manual_seed(sampler_seed),
+            )
+            weighted_frames = sum(
+                weight != default_weight for weight in frame_weights
+            )
+            print(
+                "[ACT train] Weighted episode sampling: "
+                f"{weighted_frames}/{len(frame_weights)} frames have custom weights."
+            )
+        elif distributed_context is not None:
+            rank, world_size, _ = distributed_context
             sampler = kwargs.get("sampler")
             if sampler is not None:
                 kwargs["sampler"] = list(sampler)[rank::world_size]
@@ -132,8 +180,12 @@ def _patch_lerobot_dataset_factory(distributed_context=None):
                     dataset, world_size, rank
                 )
                 kwargs["shuffle"] = False
-            return original_dataloader(dataset, *args, **kwargs)
-        torch.utils.data.DataLoader = make_dataloader
+        return original_dataloader(dataset, *args, **kwargs)
+
+    torch.utils.data.DataLoader = make_dataloader
+    if distributed_context is not None:
+        original_make_policy = train_module.make_policy
+        _, _, local_rank = distributed_context
         def make_patched_policy(*args, **kwargs):
             policy = original_make_policy(*args, **kwargs)
             ddp_policy = torch.nn.parallel.DistributedDataParallel(
@@ -166,6 +218,14 @@ def parse_args():
     parser.add_argument("--n-obs-steps", type=int, default=1)
     parser.add_argument("--chunk-size", type=int, default=16)
     parser.add_argument("--n-action-steps", type=int, default=8)
+    parser.add_argument(
+        "--pretrained-policy",
+        help="Local checkpoint or Hugging Face model used to initialize ACT weights.",
+    )
+    parser.add_argument(
+        "--episode-weights-json",
+        help="JSON sampling plan with default_weight and episode_weights fields.",
+    )
     parser.add_argument("--use-amp", action="store_true")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb-project", default="robosynchallenge")
@@ -181,6 +241,9 @@ def parse_args():
 
 def main():
     args = parse_args()
+    sampling_weights = _load_episode_weights(args.episode_weights_json)
+    if args.distributed and sampling_weights is not None:
+        raise ValueError("Weighted episode sampling currently supports one training process.")
     distributed_context = None
     if args.distributed:
         import torch.distributed as dist
@@ -201,7 +264,11 @@ def main():
     from lerobot.configs.default import WandBConfig
     from lerobot.configs.train import TrainPipelineConfig
     from lerobot.policies.act.configuration_act import ACTConfig
-    lerobot_train = _patch_lerobot_dataset_factory(distributed_context)
+    lerobot_train = _patch_lerobot_dataset_factory(
+        distributed_context,
+        sampling_weights=sampling_weights,
+        sampler_seed=args.seed,
+    )
 
     policy_kwargs = {
         "device": args.device,
@@ -215,6 +282,22 @@ def main():
         key: value for key, value in policy_kwargs.items() if value is not None
     }
 
+    if args.pretrained_policy:
+        policy_config = ACTConfig.from_pretrained(args.pretrained_policy)
+        if policy_config.chunk_size != args.chunk_size:
+            raise ValueError(
+                "--chunk-size must match the pretrained checkpoint: "
+                f"requested {args.chunk_size}, checkpoint has {policy_config.chunk_size}."
+            )
+        policy_config.device = args.device
+        policy_config.use_amp = args.use_amp
+        policy_config.push_to_hub = False
+        policy_config.n_obs_steps = args.n_obs_steps
+        policy_config.n_action_steps = args.n_action_steps
+        policy_config.pretrained_path = args.pretrained_policy
+    else:
+        policy_config = ACTConfig(**policy_kwargs)
+
     cfg = TrainPipelineConfig(
         dataset=DatasetConfig(
             repo_id=repo_id,
@@ -222,7 +305,7 @@ def main():
             use_imagenet_stats=not args.no_imagenet_stats,
             video_backend=args.video_backend,
         ),
-        policy=ACTConfig(**policy_kwargs),
+        policy=policy_config,
         output_dir=output_dir,
         job_name=args.wandb_name or args.job_name,
         resume=args.resume,

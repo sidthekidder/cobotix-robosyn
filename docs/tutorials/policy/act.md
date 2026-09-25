@@ -75,6 +75,8 @@ Training arguments are configured from the command line:
 | `--n-obs-steps` | `1` | Number of observation steps consumed by ACT. |
 | `--chunk-size` | `16` | Number of actions predicted per policy chunk. |
 | `--n-action-steps` | `8` | Number of predicted actions executed before the next policy query. |
+| `--pretrained-policy` | None | Local checkpoint or Hugging Face model used to initialize weights for fine-tuning. |
+| `--episode-weights-json` | None | Optional per-episode sampling plan. Weighted sampling currently supports one training process. |
 | `--use-amp` | Off | Enable automatic mixed precision. |
 | `--wandb` | Off | Enable Weights & Biases logging. |
 | `--wandb-project` | `robosynchallenge` | Weights & Biases project name. |
@@ -103,6 +105,34 @@ bash policy/act/finetune.sh ${dataset_root} ${output_dir} ${gpu_use} \
   --wandb \
   --overwrite
 ```
+
+To fine-tune the released click-bell checkpoint with the Cobotix hard-edge
+sampling plan:
+
+```bash
+repo_root=$(pwd)
+bash policy/act/finetune.sh \
+  "$repo_root/datasets/cobotmagic_Sim_click_bell" \
+  "$repo_root/outputs/train/act_click_bell_hard_edges_x3" \
+  0 \
+  --pretrained-policy "$repo_root/checkpoints/ACT_sim_click_bell" \
+  --episode-weights-json "$repo_root/configs/training/click_bell_hard_edges_x3.json" \
+  --steps 5000 \
+  --batch-size 32 \
+  --chunk-size 50 \
+  --n-action-steps 50 \
+  --use-amp \
+  --log-freq 100 \
+  --save-freq 1000 \
+  --overwrite
+```
+
+This plan gives 3x weight to 243 of the 1,000 demonstrations whose lowest
+right-end-effector approach position is in one of the two difficult edge bins.
+That raises their expected share of training samples from 24.3% to 49.1% while
+retaining all central demonstrations. The proxy is not a stored bell pose, so
+the weighted run must be treated as an experiment and compared with the released
+checkpoint on fixed seeds.
 
 For 2-GPU training with global batch size 64:
 ```bash
