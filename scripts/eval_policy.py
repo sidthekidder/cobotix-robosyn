@@ -959,6 +959,9 @@ def main():
             "dp_num_inference_steps": config.get("dp_num_inference_steps"),
             "act_step": config.get("act_step"),
             "n_action_steps": config.get("n_action_steps"),
+            "act_temporal_ensemble_coeff": config.get(
+                "act_temporal_ensemble_coeff"
+            ),
             "act_recovery_enabled": config.get("act_recovery_enabled", False),
             "act_recovery_min_step": config.get("act_recovery_min_step"),
             "act_recovery_plateau_steps": config.get(

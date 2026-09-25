@@ -29,6 +29,7 @@ eval_episode_seeds: null
 checkpoint_path: null
 act_step: 10
 n_action_steps: null
+act_temporal_ensemble_coeff: null
 act_recovery_enabled: false
 act_recovery_min_step: 60
 act_recovery_plateau_steps: 10

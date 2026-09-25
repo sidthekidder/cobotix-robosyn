@@ -17,6 +17,7 @@ EPISODES="${EPISODES:-50}"
 SEED="${SEED:-0}"
 GPU_ID="${GPU_ID:-0}"
 ACT_N_ACTION_STEPS="${ACT_N_ACTION_STEPS:-}"
+ACT_TEMPORAL_ENSEMBLE_COEFF="${ACT_TEMPORAL_ENSEMBLE_COEFF:-}"
 ACT_RECOVERY_ENABLED="${ACT_RECOVERY_ENABLED:-false}"
 ACT_RECOVERY_MIN_STEP="${ACT_RECOVERY_MIN_STEP:-60}"
 ACT_RECOVERY_PLATEAU_STEPS="${ACT_RECOVERY_PLATEAU_STEPS:-10}"
@@ -49,6 +50,14 @@ if [[ "$EVAL_EXPERT_CHECK" != "true" && "$EVAL_EXPERT_CHECK" != "false" ]]; then
 fi
 if [[ "$ACT_RECOVERY_ENABLED" != "true" && "$ACT_RECOVERY_ENABLED" != "false" ]]; then
     echo "ACT_RECOVERY_ENABLED must be true or false." >&2
+    exit 2
+fi
+if [[ -n "$ACT_TEMPORAL_ENSEMBLE_COEFF" ]] && ! [[ "$ACT_TEMPORAL_ENSEMBLE_COEFF" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
+    echo "ACT_TEMPORAL_ENSEMBLE_COEFF must be a non-negative number." >&2
+    exit 2
+fi
+if [[ -n "$ACT_TEMPORAL_ENSEMBLE_COEFF" && "$ACT_RECOVERY_ENABLED" == "true" ]]; then
+    echo "Temporal ensembling and contact recovery must be evaluated separately." >&2
     exit 2
 fi
 for value_name in ACT_RECOVERY_MIN_STEP ACT_RECOVERY_PLATEAU_STEPS ACT_RECOVERY_MAX_REPLANS; do
@@ -146,6 +155,7 @@ CHECKPOINT_REPO="$CHECKPOINT_REPO" \
 CHECKPOINT_REVISION="$CHECKPOINT_REVISION" \
 TASK="$TASK" SETTING="$SETTING" EPISODES="$EPISODES" SEED="$SEED" \
 ACT_N_ACTION_STEPS="$ACT_N_ACTION_STEPS" \
+ACT_TEMPORAL_ENSEMBLE_COEFF="$ACT_TEMPORAL_ENSEMBLE_COEFF" \
 ACT_RECOVERY_ENABLED="$ACT_RECOVERY_ENABLED" \
 ACT_RECOVERY_MIN_STEP="$ACT_RECOVERY_MIN_STEP" \
 ACT_RECOVERY_PLATEAU_STEPS="$ACT_RECOVERY_PLATEAU_STEPS" \
@@ -179,6 +189,11 @@ manifest = {
     "act_n_action_steps": (
         int(os.environ["ACT_N_ACTION_STEPS"])
         if os.environ.get("ACT_N_ACTION_STEPS")
+        else None
+    ),
+    "act_temporal_ensemble_coeff": (
+        float(os.environ["ACT_TEMPORAL_ENSEMBLE_COEFF"])
+        if os.environ.get("ACT_TEMPORAL_ENSEMBLE_COEFF")
         else None
     ),
     "act_recovery": {
@@ -215,6 +230,11 @@ export EMBODICHAIN_ROOT="$EMBODICHAIN_DIR"
 act_overrides=()
 if [[ -n "$ACT_N_ACTION_STEPS" ]]; then
     act_overrides+=(--n_action_steps "$ACT_N_ACTION_STEPS")
+fi
+if [[ -n "$ACT_TEMPORAL_ENSEMBLE_COEFF" ]]; then
+    act_overrides+=(
+        --act_temporal_ensemble_coeff "$ACT_TEMPORAL_ENSEMBLE_COEFF"
+    )
 fi
 if [[ "$ACT_RECOVERY_ENABLED" == "true" ]]; then
     act_overrides+=(

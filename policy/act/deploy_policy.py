@@ -42,8 +42,31 @@ def get_model(usr_args):
 
     device = usr_args.get("device", usr_args.get("pytorch_device", "cuda"))
     cli_overrides = [f"--device={device}"]
+    temporal_ensemble_coeff = usr_args.get("act_temporal_ensemble_coeff")
+    recovery_enabled = _as_bool(usr_args.get("act_recovery_enabled", False))
+    if temporal_ensemble_coeff is not None and recovery_enabled:
+        raise ValueError(
+            "Contact recovery and temporal ensembling must be evaluated separately."
+        )
     n_action_steps = usr_args.get("n_action_steps")
-    if n_action_steps is not None:
+    if temporal_ensemble_coeff is not None:
+        temporal_ensemble_coeff = float(temporal_ensemble_coeff)
+        if temporal_ensemble_coeff < 0:
+            raise ValueError(
+                "act_temporal_ensemble_coeff must be non-negative, got "
+                f"{temporal_ensemble_coeff}."
+            )
+        if n_action_steps not in (None, 1, "1"):
+            raise ValueError(
+                "Temporal ensembling requires n_action_steps=1 or unset."
+            )
+        cli_overrides.extend(
+            [
+                "--n_action_steps=1",
+                f"--temporal_ensemble_coeff={temporal_ensemble_coeff}",
+            ]
+        )
+    elif n_action_steps is not None:
         n_action_steps = int(n_action_steps)
         if n_action_steps <= 0:
             raise ValueError(
@@ -85,7 +108,7 @@ def get_model(usr_args):
     policy.act_image_keys = image_keys
     policy.image_key_map = image_key_map
     policy.act_recovery = None
-    if _as_bool(usr_args.get("act_recovery_enabled", False)):
+    if recovery_enabled:
         policy.act_recovery = ContactPlateauRecovery(
             min_step=int(usr_args.get("act_recovery_min_step", 60)),
             plateau_steps=int(usr_args.get("act_recovery_plateau_steps", 10)),
