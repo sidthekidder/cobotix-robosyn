@@ -9,6 +9,7 @@ the teleport itself is never used as a training label.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 from pathlib import Path
 import sys
@@ -174,6 +175,18 @@ def _collect(args: argparse.Namespace, specs: list[CorrectionSpec]) -> None:
     import scripts.run_env as challenge_run_env  # noqa: F401 - registers managers
     from embodichain.lab.gym.utils.gym_utils import build_env_cfg_from_args
     from embodichain.utils.logger import log_info, log_warning
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+
+    # Current EmbodiChain passes this argument when it creates the recorder.
+    # The ACT lockfile intentionally pins an older LeRobot revision, so fail
+    # here with a useful remedy instead of deep inside gym.make().
+    if "metadata_buffer_size" not in inspect.signature(LeRobotDataset.create).parameters:
+        raise RuntimeError(
+            "Corrective collection requires LeRobot >=0.4.4. Run the collector "
+            "from the EmbodiChain simulator environment, or install lerobot==0.4.4 "
+            "in a dedicated collection environment; the policy/act lockfile pins "
+            "an older recorder API."
+        )
 
     if not args.gym_config or not args.action_config:
         raise ValueError("--gym_config and --action_config are required unless --dry-run")

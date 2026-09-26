@@ -1,0 +1,146 @@
+{
+  "schema_version": 1,
+  "task": "click_bell",
+  "seed": 20260925,
+  "requested_episodes": 3,
+  "source_gym_config": "configs/click_bell/random/gym_config.json",
+  "source_action_config": "configs/click_bell/action_config.json",
+  "attempts": [
+    {
+      "attempt": 1,
+      "episode": 0,
+      "anchor_step": 42,
+      "target_step": 49,
+      "recovery_steps": 12,
+      "offset_m": [
+        -0.008837070420896584,
+        0.0,
+        0.0
+      ],
+      "canonical_steps": 74,
+      "recorded_steps": 36,
+      "anchor_pose_m": [
+        0.5839000940322876,
+        -0.22062517702579498,
+        0.9051752090454102
+      ],
+      "perturbed_pose_m": [
+        0.5750630497932434,
+        -0.22062517702579498,
+        0.9051752090454102
+      ],
+      "saved": true,
+      "success": true
+    },
+    {
+      "attempt": 2,
+      "episode": 1,
+      "anchor_step": 39,
+      "target_step": 49,
+      "recovery_steps": 12,
+      "offset_m": [
+        0.0,
+        -0.007960067839163542,
+        0.0
+      ],
+      "saved": false,
+      "reason": "canonical_planning_failed"
+    },
+    {
+      "attempt": 3,
+      "episode": 1,
+      "anchor_step": 39,
+      "target_step": 49,
+      "recovery_steps": 12,
+      "offset_m": [
+        0.0,
+        -0.007960067839163542,
+        0.0
+      ],
+      "saved": false,
+      "reason": "canonical_planning_failed"
+    },
+    {
+      "attempt": 4,
+      "episode": 1,
+      "anchor_step": 39,
+      "target_step": 49,
+      "recovery_steps": 12,
+      "offset_m": [
+        0.0,
+        -0.007960067839163542,
+        0.0
+      ],
+      "saved": false,
+      "reason": "canonical_planning_failed"
+    },
+    {
+      "attempt": 5,
+      "episode": 1,
+      "anchor_step": 39,
+      "target_step": 49,
+      "recovery_steps": 12,
+      "offset_m": [
+        0.0,
+        -0.007960067839163542,
+        0.0
+      ],
+      "canonical_steps": 74,
+      "recorded_steps": 36,
+      "anchor_pose_m": [
+        0.5122383832931519,
+        0.12600189447402954,
+        0.9856829643249512
+      ],
+      "perturbed_pose_m": [
+        0.5122383832931519,
+        0.11804182827472687,
+        0.9856829643249512
+      ],
+      "saved": true,
+      "success": true
+    },
+    {
+      "attempt": 6,
+      "episode": 2,
+      "anchor_step": 34,
+      "target_step": 49,
+      "recovery_steps": 12,
+      "offset_m": [
+        0.0,
+        0.0,
+        -0.004814772739243388
+      ],
+      "saved": false,
+      "reason": "canonical_planning_failed"
+    },
+    {
+      "attempt": 7,
+      "episode": 2,
+      "anchor_step": 34,
+      "target_step": 49,
+      "recovery_steps": 12,
+      "offset_m": [
+        0.0,
+        0.0,
+        -0.004814772739243388
+      ],
+      "canonical_steps": 74,
+      "recorded_steps": 36,
+      "anchor_pose_m": [
+        0.5735504031181335,
+        -0.1596302092075348,
+        0.9855366945266724
+      ],
+      "perturbed_pose_m": [
+        0.5735504031181335,
+        -0.1596302092075348,
+        0.9807219505310059
+      ],
+      "saved": true,
+      "success": true
+    }
+  ],
+  "saved_episodes": 3,
+  "total_attempts": 7
+}

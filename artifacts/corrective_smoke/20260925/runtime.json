@@ -1,0 +1,7 @@
+{
+  "source_commit": "fb9baa0",
+  "pod_id": "c0yioy9jtukfqn",
+  "gpu": "NVIDIA A40",
+  "lerobot": "0.4.4",
+  "episodes": 3
+}
