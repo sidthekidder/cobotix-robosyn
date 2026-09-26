@@ -56,6 +56,41 @@ def _replace_scalar_column(table: pa.Table, name: str, values: list[int]) -> pa.
     return table.set_column(index, name, pa.array(values, type=table.schema.field(name).type))
 
 
+def _zero_value(data_type: pa.DataType):
+    """Build a concrete placeholder for an unused feature in the base schema."""
+    if pa.types.is_floating(data_type):
+        return 0.0
+    if pa.types.is_integer(data_type):
+        return 0
+    if pa.types.is_boolean(data_type):
+        return False
+    if pa.types.is_fixed_size_list(data_type):
+        return [_zero_value(data_type.value_type) for _ in range(data_type.list_size)]
+    if pa.types.is_list(data_type) or pa.types.is_large_list(data_type):
+        return []
+    if pa.types.is_string(data_type) or pa.types.is_large_string(data_type):
+        return ""
+    raise TypeError(f"cannot synthesize placeholder for Arrow type {data_type}")
+
+
+def _align_to_base_schema(table: pa.Table, base_schema: pa.Schema) -> pa.Table:
+    """Match the base parquet schema and avoid None values during collation.
+
+    The released ClickBell data includes end-effector pose columns that the
+    current recorder does not emit. ACT does not consume them, but LeRobot's
+    default collator still visits every column. Concrete zero placeholders keep
+    those unused fields collatable.
+    """
+    arrays = []
+    for field in base_schema:
+        if field.name in table.column_names:
+            arrays.append(table[field.name].cast(field.type))
+        else:
+            value = _zero_value(field.type)
+            arrays.append(pa.array([value] * table.num_rows, type=field.type))
+    return pa.Table.from_arrays(arrays, schema=base_schema.remove_metadata())
+
+
 def _sampling_plan(
     base_episodes: list[dict],
     correction_episodes: list[dict],
@@ -121,6 +156,9 @@ def merge(args: argparse.Namespace) -> None:
         raise ValueError("corrective episode and stats counts differ")
 
     shutil.copytree(base, output)
+    base_schema = pq.read_schema(
+        base / _format(base_info["data_path"], int(base_episodes[0]["episode_index"]))
+    )
     first_index = len(base_episodes)
     global_index = int(base_info["total_frames"])
     appended_episodes: list[dict] = []
@@ -144,6 +182,7 @@ def merge(args: argparse.Namespace) -> None:
         table = _replace_scalar_column(
             table, "index", list(range(global_index, global_index + table.num_rows))
         )
+        table = _align_to_base_schema(table, base_schema)
         destination_data = output / _format(base_info["data_path"], destination_index)
         destination_data.parent.mkdir(parents=True, exist_ok=True)
         pq.write_table(table.replace_schema_metadata(None), destination_data)
