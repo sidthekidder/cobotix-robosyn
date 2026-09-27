@@ -131,3 +131,16 @@ that can prevent the same failure on a fresh pod.
 - **Prevention:** Derive collection quotas from the intersection of oracle
   coverage and policy failures, rather than from the evaluation distribution
   alone. Report both oracle-rejected and policy-success discard counts.
+
+## 2026-09-27: Progress manifest hid discarded attempts
+
+- **Symptom:** The on-disk manifest count remained unchanged for several
+  minutes even though current simulator logs and GPU utilization showed the
+  collector progressing.
+- **Root cause:** The collector checkpointed its manifest only after recovery
+  attempts, not after expert-plan failures or policy-success discards.
+- **Resolution:** Write the manifest after every completed attempt. Determine a
+  scene's region immediately after reset and skip it before expert planning or
+  policy rollout when that region's quota is already full.
+- **Prevention:** Treat progress telemetry as part of long-run reliability and
+  smoke-test at least one discard path as well as one saved path.

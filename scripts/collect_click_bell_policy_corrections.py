@@ -343,10 +343,22 @@ def _collect(args: argparse.Namespace) -> None:
             attempt: dict[str, Any] = {"attempt": attempt_index, "seed": scene_seed}
             prepare_episode_reset(env, scene_seed)
             obs, _ = env.reset(seed=scene_seed, options={"save_data": False})
+            base = env.unwrapped
+            initial_diagnostics = base.get_episode_diagnostics()
+            button = np.asarray(initial_diagnostics["button_base_position_m"]).reshape(-1, 3)[0].tolist()
+            region = _region(button, args)
+            attempt.update(button_base_position_m=button, region=region)
+            if counts[region] >= quotas[region]:
+                attempt.update(saved=False, reason="region_quota_filled_precheck")
+                manifest["attempts"].append(attempt)
+                _write_manifest(recorder, manifest, counts)
+                continue
+
             canonical = env.get_wrapper_attr("create_demo_action_list")(action_sentence=0)
             if canonical is None or len(canonical) == 0:
                 attempt.update(saved=False, reason="canonical_planning_failed")
                 manifest["attempts"].append(attempt)
+                _write_manifest(recorder, manifest, counts)
                 continue
 
             # Some planners query or update simulator-side caches. Replay the
@@ -374,13 +386,9 @@ def _collect(args: argparse.Namespace) -> None:
                     break
 
             diagnostics = base.get_episode_diagnostics()
-            button = np.asarray(diagnostics["button_base_position_m"]).reshape(-1, 3)[0].tolist()
-            region = _region(button, args)
             attempt.update(
                 policy_success=policy_success,
                 policy_steps=steps,
-                button_base_position_m=button,
-                region=region,
                 eligible_snapshots=len(candidates),
                 final_diagnostics={
                     "max_press_depth_m": _scalar(diagnostics["max_press_depth_m"]),
@@ -393,14 +401,12 @@ def _collect(args: argparse.Namespace) -> None:
             if policy_success:
                 attempt.update(saved=False, reason="policy_succeeded")
                 manifest["attempts"].append(attempt)
-                continue
-            if counts[region] >= quotas[region]:
-                attempt.update(saved=False, reason="region_quota_filled")
-                manifest["attempts"].append(attempt)
+                _write_manifest(recorder, manifest, counts)
                 continue
             if not candidates:
                 attempt.update(saved=False, reason="no_near_contact_snapshot")
                 manifest["attempts"].append(attempt)
+                _write_manifest(recorder, manifest, counts)
                 continue
 
             chosen = min(candidates, key=lambda item: item.rank)
@@ -416,6 +422,7 @@ def _collect(args: argparse.Namespace) -> None:
             if canonical is None or len(canonical) == 0:
                 attempt.update(saved=False, reason="replay_planning_failed")
                 manifest["attempts"].append(attempt)
+                _write_manifest(recorder, manifest, counts)
                 continue
             base = env.unwrapped
             target = _target_details(base, canonical, args.target_plan_step)
