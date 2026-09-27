@@ -167,7 +167,11 @@ def _collect(args: argparse.Namespace) -> None:
                 pending_scene = None
             base = env.unwrapped
             position = (
-                _as_numpy(base.get_episode_diagnostics()["button_base_position_m"])
+                _as_numpy(
+                    base.sim.get_articulation("button").get_link_pose(
+                        "button_base", to_matrix=True
+                    )[:, :3, 3]
+                )
                 .reshape(-1, 3)[0]
                 .tolist()
             )
