@@ -124,8 +124,10 @@ that can prevent the same failure on a fresh pod.
   17/52 hard scenes and ACT solves 15/17 of those. Asking for 50 hard-region
   policy failures therefore selects a tiny intersection and can exhaust the
   attempt budget.
-- **Resolution:** Stop the invalid quota run and use a 40-example first pilot:
-  two high-x failures, two high-y failures, and 36 other failures. Keep the
+- **Resolution:** Stop the invalid quota run and request two high-x failures,
+  two high-y failures, and other failures. Freeze the first pilot at 20 total
+  examples once both hard quotas are complete; a 5% weighted sampler does not
+  require 40 raw corrections for the initial 1,000-update gate. Keep the
   unchanged dev20 gate to measure whether even this limited hard coverage
   helps.
 - **Prevention:** Derive collection quotas from the intersection of oracle
@@ -144,3 +146,30 @@ that can prevent the same failure on a fresh pod.
   policy rollout when that region's quota is already full.
 - **Prevention:** Treat progress telemetry as part of long-run reliability and
   smoke-test at least one discard path as well as one saved path.
+
+## 2026-09-27: Graceful interruption could save an incomplete rollout
+
+- **Symptom:** The pilot reached its practical 20-example stopping point while
+  the collector was configured to continue to 40 and had already begun the
+  next simulator attempt.
+- **Root cause:** The collector's `finally` block closes the environment, and
+  the legacy recorder can finalize an active rollout during close. Sending an
+  ordinary interrupt after the next attempt starts can therefore append a
+  partial, policy-only episode.
+- **Resolution:** After the 20th episode and manifest were durably written,
+  stop the Python child without running finalizers. Validate the resulting
+  `meta/info.json`: v2.1, 20 episodes, 400 frames, and 25 FPS.
+- **Prevention:** Give future collectors a checkpoint-boundary stop flag that
+  exits before the next reset. Until then, validate episode and frame counts
+  after any early stop and before merging.
+
+## 2026-09-27: Public Hugging Face download used reduced rate limits
+
+- **Symptom:** The Hub warned that the released click-bell dataset was being
+  downloaded without authentication and could receive lower rate limits.
+- **Root cause:** The disposable pod intentionally had no Hugging Face token.
+- **Resolution:** Continue the public download; authentication is unnecessary
+  for correctness, and the correction dataset was copied off-pod first.
+- **Prevention:** Cache the released base dataset on a persistent volume for
+  repeated experiments, or provide a scoped read-only token when transfer time
+  materially affects GPU cost.
