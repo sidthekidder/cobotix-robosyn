@@ -149,14 +149,22 @@ def _collect(args: argparse.Namespace) -> None:
     rng = np.random.default_rng(args.seed)
     sidecar_rows: list[dict[str, Any]] = []
     attempts: list[dict[str, Any]] = []
+    pending_scene: tuple[int, Any] | None = None
 
     try:
         progress = tqdm.tqdm(total=args.episodes, desc="Saved balanced demos", unit="episode")
         for attempt_index in range(1, args.max_attempts + 1):
             if int(recorder.curr_episode) >= args.episodes:
                 break
-            scene_seed = int(rng.integers(0, 2**31 - 1))
-            obs, _ = env.reset(seed=scene_seed, options={"save_data": False})
+            if pending_scene is None:
+                scene_seed = int(rng.integers(0, 2**31 - 1))
+                obs, _ = env.reset(seed=scene_seed, options={"save_data": False})
+            else:
+                # The recorder reset used to save the preceding episode also
+                # initializes the next randomized scene. Reuse it instead of
+                # resetting twice, which leaves that pose unchanged in DexSim.
+                scene_seed, obs = pending_scene
+                pending_scene = None
             base = env.unwrapped
             position = (
                 _as_numpy(base.get_episode_diagnostics()["button_base_position_m"])
@@ -185,7 +193,9 @@ def _collect(args: argparse.Namespace) -> None:
                 env.step(action)
             success = _is_success(env)
             episode_index = int(recorder.curr_episode)
-            env.reset(options={"save_data": success})
+            next_seed = int(rng.integers(0, 2**31 - 1))
+            next_obs, _ = env.reset(seed=next_seed, options={"save_data": success})
+            pending_scene = (next_seed, next_obs)
             saved = int(recorder.curr_episode) > episode_index
             record.update(saved=saved, success=success, frames=len(actions))
             attempts.append(record)
