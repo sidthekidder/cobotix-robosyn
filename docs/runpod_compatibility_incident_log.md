@@ -163,13 +163,31 @@ that can prevent the same failure on a fresh pod.
   exits before the next reset. Until then, validate episode and frame counts
   after any early stop and before merging.
 
-## 2026-09-27: Public Hugging Face download used reduced rate limits
+## 2026-09-27: Public Hugging Face snapshot download hit HTTP 429
 
 - **Symptom:** The Hub warned that the released click-bell dataset was being
-  downloaded without authentication and could receive lower rate limits.
+  downloaded without authentication, then stalled after 898 files. A direct
+  API probe returned HTTP 429 while the Python process remained alive.
 - **Root cause:** The disposable pod intentionally had no Hugging Face token.
-- **Resolution:** Continue the public download; authentication is unnecessary
-  for correctness, and the correction dataset was copied off-pod first.
+- **Resolution:** Stop the stalled snapshot. Copy the complete 1,000-episode
+  parquet and metadata snapshot already cached on the Mac, then fetch the
+  3,000 predictable camera-video paths directly from the CDN with bounded
+  parallelism and retries. The pod fetched 2,980 before another throttle; the
+  final 20 were fetched from the Mac and transferred. Validate 1,000 parquet
+  files, 3,000 nonempty MP4 files, and 74,000 declared frames.
 - **Prevention:** Cache the released base dataset on a persistent volume for
   repeated experiments, or provide a scoped read-only token when transfer time
-  materially affects GPU cost.
+  materially affects GPU cost. Monitor completed file counts, not only whether
+  the downloader PID exists.
+
+## 2026-09-27: macOS tar added AppleDouble sidecar files
+
+- **Symptom:** After transferring cached data from the Mac, validation counted
+  2,000 parquet files instead of 1,000 and 3,020 MP4 files instead of 3,000.
+- **Root cause:** BSD tar preserved macOS extended attributes as `._*`
+  AppleDouble files. The 20 videos fetched on the Mac added 20 more sidecars.
+- **Resolution:** Delete only `._*` files, then repeat the exact parquet, MP4,
+  zero-byte, and metadata-count checks before merging.
+- **Prevention:** Disable macOS metadata when creating transfer archives or
+  filter `._*` files immediately after extraction. Always count canonical
+  dataset objects before training.
