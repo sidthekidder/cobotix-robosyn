@@ -6,8 +6,10 @@ successes, deterministically replays a failed scene, restores the closest
 eligible near-contact robot state, and records only the expert recovery tail.
 The fixed 20-scene development seeds are excluded from collection.
 
-The default 100-episode collection balances three scene slices: 25 high-x,
-25 high-y, and 50 other scenes. A manifest records every attempted seed, the
+The first controlled collection targets 40 episodes: two high-x failures, two
+high-y failures, and 36 other failures. Hard-region quotas are deliberately
+small because the scripted expert rejects most hard scenes and ACT solves most
+of the hard scenes it accepts. A manifest records every attempted seed, the
 failure diagnostics, the selected policy snapshot, and whether recovery data
 was saved.
 
@@ -24,7 +26,7 @@ Collect data on the simulator host:
 ```bash
 bash launch/collect_click_bell_policy_corrections.sh \
   --checkpoint /workspace/checkpoints/click_bell_hard_edges_x3_005000 \
-  --episodes 100 --seed 20260926
+  --episodes 40 --seed 20260927
 ```
 
 Run collection in the checkpoint's native LeRobot 0.3.3 ACT environment. The

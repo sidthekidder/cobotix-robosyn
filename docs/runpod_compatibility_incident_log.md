@@ -113,3 +113,21 @@ that can prevent the same failure on a fresh pod.
 - **Prevention:** The one-episode smoke must include frame conversion,
   `save_episode()`, and finalization; model loading alone cannot verify the
   recorder boundary.
+
+## 2026-09-27: Hard-region recovery quotas conflicted with oracle coverage
+
+- **Symptom:** A 100-example run requested 25 high-x and 25 high-y failures,
+  but its first 31 seeds saved four central corrections; both accepted high-x
+  scenes were policy successes and no accepted high-y failure appeared.
+- **Root cause:** Policy-conditioned recovery still needs the scripted expert's
+  canonical press target. Our held-out audit showed the expert accepts only
+  17/52 hard scenes and ACT solves 15/17 of those. Asking for 50 hard-region
+  policy failures therefore selects a tiny intersection and can exhaust the
+  attempt budget.
+- **Resolution:** Stop the invalid quota run and use a 40-example first pilot:
+  two high-x failures, two high-y failures, and 36 other failures. Keep the
+  unchanged dev20 gate to measure whether even this limited hard coverage
+  helps.
+- **Prevention:** Derive collection quotas from the intersection of oracle
+  coverage and policy failures, rather than from the evaluation distribution
+  alone. Report both oracle-rejected and policy-success discard counts.

@@ -68,7 +68,7 @@ class Snapshot:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--checkpoint")
-    parser.add_argument("--episodes", type=int, default=100)
+    parser.add_argument("--episodes", type=int, default=40)
     parser.add_argument("--seed", type=int, default=20260926)
     parser.add_argument("--max-attempts", type=int, default=600)
     parser.add_argument("--rollout-steps", type=int, default=361)
@@ -79,8 +79,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--hold-steps", type=int, default=8)
     parser.add_argument("--high-x-min", type=float, default=0.70)
     parser.add_argument("--high-y-min", type=float, default=0.15)
-    parser.add_argument("--high-x-quota", type=int, default=25)
-    parser.add_argument("--high-y-quota", type=int, default=25)
+    parser.add_argument("--high-x-quota", type=int, default=2)
+    parser.add_argument("--high-y-quota", type=int, default=2)
     parser.add_argument(
         "--output-root",
         default="lerobot_dataset/click_bell_policy_corrections",
