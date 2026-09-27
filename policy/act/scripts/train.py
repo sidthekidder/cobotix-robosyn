@@ -176,6 +176,8 @@ def _patch_lerobot_dataset_factory(
     distributed_context=None,
     sampling_weights=None,
     sampler_seed=0,
+    bell_keypoints_jsonl=None,
+    bell_keypoint_loss_weight=0.0,
 ):
     import lerobot.scripts.train as train_module
 
@@ -190,6 +192,18 @@ def _patch_lerobot_dataset_factory(
             for alias_key, source_key in aliases.items():
                 print(f"  {source_key} -> {alias_key}")
             dataset = _AliasedLeRobotDataset(dataset, aliases)
+        if bell_keypoints_jsonl is not None:
+            from policy.act.auxiliary_keypoints import (
+                KeypointSidecarDataset,
+                load_keypoint_sidecar,
+            )
+
+            labels = load_keypoint_sidecar(bell_keypoints_jsonl)
+            dataset = KeypointSidecarDataset(dataset, labels)
+            print(
+                f"[ACT train] Bell keypoint supervision: {len(labels)} labeled frames; "
+                f"loss_weight={bell_keypoint_loss_weight}."
+            )
         patched_state["dataset"] = dataset
         return dataset
 
@@ -230,20 +244,28 @@ def _patch_lerobot_dataset_factory(
         return original_dataloader(dataset, *args, **kwargs)
 
     torch.utils.data.DataLoader = make_dataloader
-    if distributed_context is not None:
+    if distributed_context is not None or bell_keypoints_jsonl is not None:
         original_make_policy = train_module.make_policy
-        _, _, local_rank = distributed_context
         def make_patched_policy(*args, **kwargs):
             policy = original_make_policy(*args, **kwargs)
-            ddp_policy = torch.nn.parallel.DistributedDataParallel(
-                policy,
-                device_ids=[local_rank],
-                output_device=local_rank,
-            )
-            for name in ("config", "get_optim_params", "save_pretrained", "update"):
-                if hasattr(policy, name):
-                    setattr(ddp_policy, name, getattr(policy, name))
-            return ddp_policy
+            if bell_keypoints_jsonl is not None:
+                from policy.act.auxiliary_keypoints import install_auxiliary_keypoint_training
+
+                policy = install_auxiliary_keypoint_training(
+                    policy, bell_keypoint_loss_weight
+                )
+            if distributed_context is not None:
+                _, _, local_rank = distributed_context
+                ddp_policy = torch.nn.parallel.DistributedDataParallel(
+                    policy,
+                    device_ids=[local_rank],
+                    output_device=local_rank,
+                )
+                for name in ("config", "get_optim_params", "save_pretrained", "update"):
+                    if hasattr(policy, name):
+                        setattr(ddp_policy, name, getattr(policy, name))
+                policy = ddp_policy
+            return policy
         train_module.make_policy = make_patched_policy
     return train_module.train
 
@@ -288,6 +310,16 @@ def parse_args():
             "The legacy option name is retained for compatibility."
         ),
     )
+    parser.add_argument(
+        "--bell-keypoints-jsonl",
+        help="Frame-aligned JSONL labels for training-only bell localization supervision.",
+    )
+    parser.add_argument(
+        "--bell-keypoint-loss-weight",
+        type=float,
+        default=0.2,
+        help="Weight applied to the training-only bell localization loss.",
+    )
     parser.add_argument("--use-amp", action="store_true")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb-project", default="robosynchallenge")
@@ -310,6 +342,13 @@ def main():
     sampling_weights = _load_sampling_weights(args.episode_weights_json)
     if args.distributed and sampling_weights is not None:
         raise ValueError("Weighted episode sampling currently supports one training process.")
+    if args.distributed and args.bell_keypoints_jsonl is not None:
+        raise ValueError("Bell keypoint supervision currently supports one training process.")
+    if args.resume and args.bell_keypoints_jsonl is not None:
+        raise ValueError(
+            "Bell keypoint runs cannot resume because the auxiliary head is intentionally "
+            "excluded from submission-compatible checkpoints."
+        )
     distributed_context = None
     if args.distributed:
         import torch.distributed as dist
@@ -335,6 +374,8 @@ def main():
         distributed_context,
         sampling_weights=sampling_weights,
         sampler_seed=args.seed,
+        bell_keypoints_jsonl=args.bell_keypoints_jsonl,
+        bell_keypoint_loss_weight=args.bell_keypoint_loss_weight,
     )
 
     policy_kwargs = {
