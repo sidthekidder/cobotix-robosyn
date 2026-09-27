@@ -215,7 +215,10 @@ class ClickBellActionBank(ActionBank):
                 ),
             )
 
-            return ret.positions[0].numpy().T
+            # Toppra returns CUDA tensors when the simulator runs on a GPU.
+            # NumPy can only view CPU memory, so move the planned trajectory
+            # explicitly before handing it to the action-bank scheduler.
+            return ret.positions[0].detach().cpu().numpy().T
 
     @staticmethod
     @tag_edge
