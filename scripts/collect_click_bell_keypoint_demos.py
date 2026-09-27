@@ -110,6 +110,12 @@ def _collect(args: argparse.Namespace) -> None:
     import robosynchallenge  # noqa: F401
     import scripts.run_env as challenge_run_env  # noqa: F401
     from embodichain.lab.gym.utils.gym_utils import build_env_cfg_from_args
+    from lerobot.datasets.lerobot_dataset import LeRobotDataset
+    from scripts.collect_click_bell_policy_corrections import (
+        _install_lerobot_recorder_compat,
+    )
+
+    recorder_compat = _install_lerobot_recorder_compat(LeRobotDataset)
 
     if not args.gym_config or not args.action_config:
         raise ValueError("--gym_config and --action_config are required")
@@ -208,6 +214,7 @@ def _collect(args: argparse.Namespace) -> None:
             "collection_type": "bell_keypoint_balanced",
             "cameras": list(CAMERAS),
             "coordinate_order": ["x_normalized", "y_normalized", "visible"],
+            "legacy_lerobot_recorder_compat": recorder_compat,
             "grid": {"x": args.grid_x, "y": args.grid_y},
             "ranges_m": {"x": args.x_range, "y": args.y_range},
             "quotas": {f"{x},{y}": value for (x, y), value in quotas.items()},
