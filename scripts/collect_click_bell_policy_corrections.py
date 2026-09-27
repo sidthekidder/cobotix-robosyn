@@ -214,7 +214,7 @@ def _is_success(env: Any) -> bool:
     return _is_done(env.get_wrapper_attr("is_task_success")())
 
 
-def _install_lerobot_create_compat(dataset_class: Any) -> bool:
+def _install_lerobot_recorder_compat(dataset_class: Any) -> list[str]:
     """Let the current recorder call older LeRobot without changing ACT.
 
     EmbodiChain passes ``metadata_buffer_size`` to LeRobot 0.4+, but the ACT
@@ -223,20 +223,46 @@ def _install_lerobot_create_compat(dataset_class: Any) -> bool:
     writer otherwise supports the recorder calls used here, so ignore only the
     unknown buffering hint and keep policy loading byte-compatible.
     """
-    if getattr(dataset_class.create, "_robosyn_metadata_compat", False):
-        return False
-    if "metadata_buffer_size" in inspect.signature(dataset_class.create).parameters:
-        return False
+    installed: list[str] = []
+    if (
+        "metadata_buffer_size" not in inspect.signature(dataset_class.create).parameters
+        and not getattr(dataset_class.create, "_robosyn_metadata_compat", False)
+    ):
+        original_create = dataset_class.create
 
-    original_create = dataset_class.create
+        def create_compat(*create_args: Any, **create_kwargs: Any) -> Any:
+            create_kwargs.pop("metadata_buffer_size", None)
+            return original_create(*create_args, **create_kwargs)
 
-    def create_compat(*create_args: Any, **create_kwargs: Any) -> Any:
-        create_kwargs.pop("metadata_buffer_size", None)
-        return original_create(*create_args, **create_kwargs)
+        create_compat._robosyn_metadata_compat = True
+        dataset_class.create = create_compat
+        installed.append("create.metadata_buffer_size")
 
-    create_compat._robosyn_metadata_compat = True
-    dataset_class.create = create_compat
-    return True
+    if (
+        "task" in inspect.signature(dataset_class.add_frame).parameters
+        and not getattr(dataset_class.add_frame, "_robosyn_task_compat", False)
+    ):
+        original_add_frame = dataset_class.add_frame
+
+        def add_frame_compat(self: Any, frame: dict[str, Any], *args: Any, **kwargs: Any) -> Any:
+            copied_frame = dict(frame)
+            task = copied_frame.pop("task", "click the bell")
+            return original_add_frame(self, copied_frame, str(task), *args, **kwargs)
+
+        add_frame_compat._robosyn_task_compat = True
+        dataset_class.add_frame = add_frame_compat
+        installed.append("add_frame.task")
+
+    if not hasattr(dataset_class, "finalize"):
+        def finalize_compat(self: Any) -> None:
+            # EmbodiChain stops the image writer immediately before this call;
+            # LeRobot 0.3.3 persists metadata in save_episode itself.
+            return None
+
+        dataset_class.finalize = finalize_compat
+        installed.append("finalize")
+
+    return installed
 
 
 def _write_manifest(recorder: Any, manifest: dict[str, Any], counts: dict[str, int]) -> Path:
@@ -262,7 +288,7 @@ def _collect(args: argparse.Namespace) -> None:
     from policy.act.deploy_policy import get_model, reset_model
     from scripts.eval_policy import prepare_episode_reset
 
-    using_legacy_recorder_compat = _install_lerobot_create_compat(LeRobotDataset)
+    legacy_recorder_compat = _install_lerobot_recorder_compat(LeRobotDataset)
     if not args.checkpoint:
         raise ValueError("--checkpoint is required")
     if not args.gym_config or not args.action_config:
@@ -305,7 +331,7 @@ def _collect(args: argparse.Namespace) -> None:
         "requested_episodes": args.episodes,
         "region_quotas": quotas,
         "excluded_seeds": sorted(DEV20_SEEDS),
-        "legacy_lerobot_recorder_compat": using_legacy_recorder_compat,
+        "legacy_lerobot_recorder_compat": legacy_recorder_compat,
         "attempts": [],
     }
 
