@@ -33,3 +33,10 @@ EmbodiChain recorder; upgrading LeRobot can discard the older checkpoint's
 stored normalization buffers. The resulting dataset still needs conversion to
 v2.1 before it can be merged with the released click-bell training set by the
 existing merge script.
+
+For the first controlled fine-tune, retain the hard-edge base sampling plan,
+allocate 5% of sampled frames to policy-conditioned corrections, and train only
+1,000 updates from the current 5K checkpoint. Use `--learning-rate 3e-6` and
+`--backbone-learning-rate 3e-6`; this reduces catastrophic forgetting relative
+to the rejected 20%-correction, `1e-5` experiment. Promote the result only if it
+beats 13/20 on the unchanged development seeds without excessive regressions.

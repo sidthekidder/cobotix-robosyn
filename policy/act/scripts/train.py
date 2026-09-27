@@ -266,6 +266,18 @@ def parse_args():
     parser.add_argument("--chunk-size", type=int, default=16)
     parser.add_argument("--n-action-steps", type=int, default=8)
     parser.add_argument(
+        "--learning-rate",
+        type=float,
+        default=None,
+        help="Override ACT optimizer_lr; pretrained checkpoint value is kept when omitted.",
+    )
+    parser.add_argument(
+        "--backbone-learning-rate",
+        type=float,
+        default=None,
+        help="Override ACT optimizer_lr_backbone; checkpoint value is kept when omitted.",
+    )
+    parser.add_argument(
         "--pretrained-policy",
         help="Local checkpoint or Hugging Face model used to initialize ACT weights.",
     )
@@ -350,7 +362,15 @@ def main():
         policy_config.n_obs_steps = args.n_obs_steps
         policy_config.n_action_steps = args.n_action_steps
         policy_config.pretrained_path = args.pretrained_policy
+        if args.learning_rate is not None:
+            policy_config.optimizer_lr = args.learning_rate
+        if args.backbone_learning_rate is not None:
+            policy_config.optimizer_lr_backbone = args.backbone_learning_rate
     else:
+        if args.learning_rate is not None:
+            policy_kwargs["optimizer_lr"] = args.learning_rate
+        if args.backbone_learning_rate is not None:
+            policy_kwargs["optimizer_lr_backbone"] = args.backbone_learning_rate
         policy_config = ACTConfig(**policy_kwargs)
 
     cfg = TrainPipelineConfig(
