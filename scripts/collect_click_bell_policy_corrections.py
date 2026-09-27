@@ -214,6 +214,31 @@ def _is_success(env: Any) -> bool:
     return _is_done(env.get_wrapper_attr("is_task_success")())
 
 
+def _install_lerobot_create_compat(dataset_class: Any) -> bool:
+    """Let the current recorder call older LeRobot without changing ACT.
+
+    EmbodiChain passes ``metadata_buffer_size`` to LeRobot 0.4+, but the ACT
+    checkpoint was trained with LeRobot 0.3.3. Upgrading LeRobot makes the new
+    loader discard that checkpoint's normalization buffers. The 0.3.3 dataset
+    writer otherwise supports the recorder calls used here, so ignore only the
+    unknown buffering hint and keep policy loading byte-compatible.
+    """
+    if getattr(dataset_class.create, "_robosyn_metadata_compat", False):
+        return False
+    if "metadata_buffer_size" in inspect.signature(dataset_class.create).parameters:
+        return False
+
+    original_create = dataset_class.create
+
+    def create_compat(*create_args: Any, **create_kwargs: Any) -> Any:
+        create_kwargs.pop("metadata_buffer_size", None)
+        return original_create(*create_args, **create_kwargs)
+
+    create_compat._robosyn_metadata_compat = True
+    dataset_class.create = create_compat
+    return True
+
+
 def _write_manifest(recorder: Any, manifest: dict[str, Any], counts: dict[str, int]) -> Path:
     manifest["saved_episodes"] = int(recorder.curr_episode)
     manifest["total_attempts"] = len(manifest["attempts"])
@@ -237,8 +262,7 @@ def _collect(args: argparse.Namespace) -> None:
     from policy.act.deploy_policy import get_model, reset_model
     from scripts.eval_policy import prepare_episode_reset
 
-    if "metadata_buffer_size" not in inspect.signature(LeRobotDataset.create).parameters:
-        raise RuntimeError("Policy-conditioned collection requires LeRobot >=0.4.4")
+    using_legacy_recorder_compat = _install_lerobot_create_compat(LeRobotDataset)
     if not args.checkpoint:
         raise ValueError("--checkpoint is required")
     if not args.gym_config or not args.action_config:
@@ -281,6 +305,7 @@ def _collect(args: argparse.Namespace) -> None:
         "requested_episodes": args.episodes,
         "region_quotas": quotas,
         "excluded_seeds": sorted(DEV20_SEEDS),
+        "legacy_lerobot_recorder_compat": using_legacy_recorder_compat,
         "attempts": [],
     }
 

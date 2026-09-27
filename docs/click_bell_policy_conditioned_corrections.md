@@ -27,7 +27,9 @@ bash launch/collect_click_bell_policy_corrections.sh \
   --episodes 100 --seed 20260926
 ```
 
-This collection path needs LeRobot 0.4.4 or newer for incremental dataset
-recording. The resulting dataset still needs conversion to v2.1 before it can
-be merged with the released click-bell training set by the existing merge
-script.
+Run collection in the checkpoint's native LeRobot 0.3.3 ACT environment. The
+collector provides the narrow compatibility shim needed by the current
+EmbodiChain recorder; upgrading LeRobot can discard the older checkpoint's
+stored normalization buffers. The resulting dataset still needs conversion to
+v2.1 before it can be merged with the released click-bell training set by the
+existing merge script.
