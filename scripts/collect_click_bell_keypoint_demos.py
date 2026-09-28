@@ -30,6 +30,13 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-attempts", type=int, default=1200)
     parser.add_argument("--grid-x", type=int, default=3)
     parser.add_argument("--grid-y", type=int, default=3)
+    parser.add_argument(
+        "--exclude-cell",
+        action="append",
+        default=[],
+        metavar="X,Y",
+        help="Grid cell to exclude from balancing; may be repeated.",
+    )
     parser.add_argument("--x-range", nargs=2, type=float, default=(0.4, 0.85))
     parser.add_argument("--y-range", nargs=2, type=float, default=(-0.3, 0.3))
     parser.add_argument(
@@ -98,6 +105,22 @@ def _cell(position: list[float], args: argparse.Namespace) -> tuple[int, int]:
     return int(x * args.grid_x), int(y * args.grid_y)
 
 
+def _excluded_cells(args: argparse.Namespace) -> set[tuple[int, int]]:
+    excluded: set[tuple[int, int]] = set()
+    for value in args.exclude_cell:
+        try:
+            x_text, y_text = value.split(",", maxsplit=1)
+            cell = (int(x_text), int(y_text))
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"invalid --exclude-cell {value!r}; expected X,Y") from error
+        if not (0 <= cell[0] < args.grid_x and 0 <= cell[1] < args.grid_y):
+            raise ValueError(
+                f"excluded cell {cell} is outside {args.grid_x}x{args.grid_y} grid"
+            )
+        excluded.add(cell)
+    return excluded
+
+
 def _is_success(env: Any) -> bool:
     value = env.get_wrapper_attr("is_task_success")()
     return bool(_as_numpy(value).any())
@@ -121,8 +144,13 @@ def _collect(args: argparse.Namespace) -> None:
         raise ValueError("--gym_config and --action_config are required")
     if args.num_envs not in (None, 1):
         raise ValueError("exactly one environment is supported")
-    if args.episodes < args.grid_x * args.grid_y:
-        raise ValueError("episodes must be at least the number of grid cells")
+    excluded_cells = _excluded_cells(args)
+    all_cells = [(x, y) for x in range(args.grid_x) for y in range(args.grid_y)]
+    cells = [cell for cell in all_cells if cell not in excluded_cells]
+    if not cells:
+        raise ValueError("at least one grid cell must remain after exclusions")
+    if args.episodes < len(cells):
+        raise ValueError("episodes must be at least the number of included grid cells")
     args.num_envs = 1
     args.max_episodes = args.episodes
 
@@ -140,12 +168,11 @@ def _collect(args: argparse.Namespace) -> None:
     )
     env = gym.make(id=gym_config["id"], cfg=env_cfg, **action_config)
     recorder = _get_recorder(env)
-    cells = [(x, y) for x in range(args.grid_x) for y in range(args.grid_y)]
     base_quota, extra = divmod(args.episodes, len(cells))
     quotas = {
         cell: base_quota + (index < extra) for index, cell in enumerate(cells)
     }
-    counts = {cell: 0 for cell in cells}
+    counts = {cell: 0 for cell in all_cells}
     rng = np.random.default_rng(args.seed)
     sidecar_rows: list[dict[str, Any]] = []
     attempts: list[dict[str, Any]] = []
@@ -182,6 +209,10 @@ def _collect(args: argparse.Namespace) -> None:
                 "button_base_position_m": position,
                 "cell": list(cell),
             }
+            if cell in excluded_cells:
+                record.update(saved=False, reason="excluded_cell")
+                attempts.append(record)
+                continue
             if counts[cell] >= quotas[cell]:
                 record.update(saved=False, reason="cell_quota_filled")
                 attempts.append(record)
@@ -192,9 +223,11 @@ def _collect(args: argparse.Namespace) -> None:
                 record.update(saved=False, reason="expert_planning_failed")
                 attempts.append(record)
                 continue
-            label = _keypoints(obs, _button_visual_ids(base))
+            visual_ids = _button_visual_ids(base)
+            frame_labels: list[list[list[float]]] = []
             for action in actions:
-                env.step(action)
+                obs, *_ = env.step(action)
+                frame_labels.append(_keypoints(obs, visual_ids))
             success = _is_success(env)
             episode_index = int(recorder.curr_episode)
             next_seed = int(rng.integers(0, 2**31 - 1))
@@ -206,7 +239,7 @@ def _collect(args: argparse.Namespace) -> None:
             if not saved:
                 continue
             counts[cell] += 1
-            for frame_index in range(len(actions)):
+            for frame_index, label in enumerate(frame_labels):
                 sidecar_rows.append(
                     {
                         "episode_index": episode_index,
@@ -230,6 +263,7 @@ def _collect(args: argparse.Namespace) -> None:
             "coordinate_order": ["x_normalized", "y_normalized", "visible"],
             "legacy_lerobot_recorder_compat": recorder_compat,
             "grid": {"x": args.grid_x, "y": args.grid_y},
+            "excluded_cells": [list(cell) for cell in sorted(excluded_cells)],
             "ranges_m": {"x": args.x_range, "y": args.y_range},
             "quotas": {f"{x},{y}": value for (x, y), value in quotas.items()},
             "counts": {f"{x},{y}": value for (x, y), value in counts.items()},
