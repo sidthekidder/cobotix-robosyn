@@ -318,3 +318,23 @@ that can prevent the same failure on a fresh pod.
   proxy-SSH session. RunPod proxy SSH does not support the SFTP subsystem, so
   use authenticated `runpodctl` transfer when available or a checksummed
   base64 stream for small emergency artifacts.
+
+## 2026-10-01: DexSim's private package host was unreachable
+
+- **Symptom:** `uv sync --frozen` downloaded and built the remaining ACT and
+  simulator dependencies, then failed to fetch `dexsim-engine==0.4.3` from
+  `http://pyp.open3dv.site:2345/`. A retry with `UV_HTTP_RETRIES=10` also
+  failed.
+- **Evidence:** TCP connection attempts timed out from both the Secure RunPod
+  host in `EU-SE-1` and a separate local network. This isolated the failure to
+  the upstream package endpoint rather than `uv`, DNS, or one RunPod host.
+- **Resolution:** Stop the pod to release the A40 while preserving its
+  container disk and completed dependency cache. Resume the same pod and rerun
+  `uv sync --frozen` after the wheel endpoint responds.
+- **Prevention:** Probe the exact locked `dexsim-engine` wheel URL before
+  starting a billable pod. Treat failure of this externally hosted wheel as a
+  setup gate, and preserve a legally redistributable, checksum-pinned cache if
+  DexForce provides one.
+- **Related setup correction:** The public source repository is
+  `https://github.com/DexForce/EmbodiChain.git`; `EmbodiChain/EmbodiChain` is
+  not the clone URL.
