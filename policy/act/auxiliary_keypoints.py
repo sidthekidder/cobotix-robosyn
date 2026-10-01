@@ -17,10 +17,59 @@ from torch import nn
 
 
 TARGET_KEY = "auxiliary.bell_keypoints"
+CAMERAS = ("cam_high", "cam_right_wrist", "cam_left_wrist")
+TARGET_MODES = ("mask-centroid", "press-point")
 
 
-def load_keypoint_sidecar(path: str | Path) -> dict[tuple[int, int], torch.Tensor]:
-    """Load normalized ``[x, y, visible]`` labels keyed by episode and frame."""
+def _press_point_targets(
+    row: dict[str, Any], path: str | Path, line_number: int
+) -> list[list[float]]:
+    geometry = row.get("geometry")
+    if not isinstance(geometry, dict):
+        raise ValueError(
+            f"{path}:{line_number}: press-point targets require schema-v2 geometry"
+        )
+
+    targets: list[list[float]] = []
+    for camera in CAMERAS:
+        camera_geometry = geometry.get(camera)
+        if camera_geometry is None:
+            targets.append([0.5, 0.5, 0.0])
+            continue
+        try:
+            point = camera_geometry["press_point"]
+            coordinates = point["xy_normalized"]
+            visible = bool(camera_geometry["press_point_visible_in_mask"])
+        except (KeyError, TypeError) as error:
+            raise ValueError(
+                f"{path}:{line_number}: incomplete press-point geometry for {camera}"
+            ) from error
+        if len(coordinates) != 2:
+            raise ValueError(
+                f"{path}:{line_number}: press-point coordinates for {camera} "
+                "must have length 2"
+            )
+        if visible:
+            targets.append([float(coordinates[0]), float(coordinates[1]), 1.0])
+        else:
+            targets.append([0.5, 0.5, 0.0])
+    return targets
+
+
+def load_keypoint_sidecar(
+    path: str | Path, target_mode: str = "mask-centroid"
+) -> dict[tuple[int, int], torch.Tensor]:
+    """Load normalized ``[x, y, visible]`` labels keyed by episode and frame.
+
+    ``mask-centroid`` preserves the schema-v1 target. ``press-point`` uses the
+    schema-v2 projection of the physical button surface and marks it visible
+    only when the projected point lies on the rendered button mask.
+    """
+
+    if target_mode not in TARGET_MODES:
+        raise ValueError(
+            f"Unknown keypoint target mode {target_mode!r}; expected one of {TARGET_MODES}"
+        )
 
     result: dict[tuple[int, int], torch.Tensor] = {}
     with Path(path).expanduser().open("r", encoding="utf-8") as handle:
@@ -29,7 +78,12 @@ def load_keypoint_sidecar(path: str | Path) -> dict[tuple[int, int], torch.Tenso
                 continue
             row = json.loads(line)
             key = (int(row["episode_index"]), int(row["frame_index"]))
-            value = torch.as_tensor(row["keypoints"], dtype=torch.float32)
+            raw_targets = (
+                row["keypoints"]
+                if target_mode == "mask-centroid"
+                else _press_point_targets(row, path, line_number)
+            )
+            value = torch.as_tensor(raw_targets, dtype=torch.float32)
             if value.ndim != 2 or value.shape[-1] != 3:
                 raise ValueError(
                     f"{path}:{line_number}: keypoints must have shape [cameras, 3]"

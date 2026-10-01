@@ -77,6 +77,44 @@ class AuxiliaryKeypointTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "duplicate frame"):
                 load_keypoint_sidecar(path)
 
+    def test_press_point_targets_use_physical_projection_and_mask_visibility(self):
+        row = {
+            "episode_index": 0,
+            "frame_index": 0,
+            "keypoints": [[0.1, 0.2, 1.0]] * 3,
+            "geometry": {
+                "cam_high": {
+                    "press_point": {"xy_normalized": [0.7, 0.6]},
+                    "press_point_visible_in_mask": True,
+                },
+                "cam_right_wrist": {
+                    "press_point": {"xy_normalized": [1.2, 0.4]},
+                    "press_point_visible_in_mask": False,
+                },
+            },
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "geometry.jsonl"
+            path.write_text(json.dumps(row) + "\n")
+            labels = load_keypoint_sidecar(path, target_mode="press-point")
+
+        target = labels[(0, 0)]
+        torch.testing.assert_close(target[0], torch.tensor([0.7, 0.6, 1.0]))
+        torch.testing.assert_close(target[1], torch.tensor([0.5, 0.5, 0.0]))
+        torch.testing.assert_close(target[2], torch.tensor([0.5, 0.5, 0.0]))
+
+    def test_press_point_targets_require_schema_v2(self):
+        row = {
+            "episode_index": 0,
+            "frame_index": 0,
+            "keypoints": [[0.5, 0.5, 1.0]],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "legacy.jsonl"
+            path.write_text(json.dumps(row) + "\n")
+            with self.assertRaisesRegex(ValueError, "schema-v2 geometry"):
+                load_keypoint_sidecar(path, target_mode="press-point")
+
     def test_training_head_is_not_exported(self):
         class Backbone(torch.nn.Module):
             def __init__(self):

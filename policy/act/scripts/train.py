@@ -178,6 +178,7 @@ def _patch_lerobot_dataset_factory(
     sampler_seed=0,
     bell_keypoints_jsonl=None,
     bell_keypoint_loss_weight=0.0,
+    bell_keypoint_target="mask-centroid",
 ):
     import lerobot.scripts.train as train_module
 
@@ -198,11 +199,13 @@ def _patch_lerobot_dataset_factory(
                 load_keypoint_sidecar,
             )
 
-            labels = load_keypoint_sidecar(bell_keypoints_jsonl)
+            labels = load_keypoint_sidecar(
+                bell_keypoints_jsonl, target_mode=bell_keypoint_target
+            )
             dataset = KeypointSidecarDataset(dataset, labels)
             print(
                 f"[ACT train] Bell keypoint supervision: {len(labels)} labeled frames; "
-                f"loss_weight={bell_keypoint_loss_weight}."
+                f"target={bell_keypoint_target}; loss_weight={bell_keypoint_loss_weight}."
             )
         patched_state["dataset"] = dataset
         return dataset
@@ -320,6 +323,15 @@ def parse_args():
         default=0.2,
         help="Weight applied to the training-only bell localization loss.",
     )
+    parser.add_argument(
+        "--bell-keypoint-target",
+        choices=("mask-centroid", "press-point"),
+        default="mask-centroid",
+        help=(
+            "Auxiliary localization target. press-point requires schema-v2 "
+            "physical geometry labels."
+        ),
+    )
     parser.add_argument("--use-amp", action="store_true")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb-project", default="robosynchallenge")
@@ -376,6 +388,7 @@ def main():
         sampler_seed=args.seed,
         bell_keypoints_jsonl=args.bell_keypoints_jsonl,
         bell_keypoint_loss_weight=args.bell_keypoint_loss_weight,
+        bell_keypoint_target=args.bell_keypoint_target,
     )
 
     policy_kwargs = {
