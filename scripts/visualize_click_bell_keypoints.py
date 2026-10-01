@@ -20,6 +20,12 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("dataset", type=Path, help="One LeRobot dataset directory")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument(
+        "--episode-index",
+        type=int,
+        default=0,
+        help="Episode to render from a multi-episode dataset (default: 0)",
+    )
     parser.add_argument("--fps", type=int, default=25)
     parser.add_argument(
         "--sheet-frames",
@@ -47,10 +53,18 @@ def _ffmpeg() -> str:
         ) from error
 
 
-def _video_path(dataset: Path, camera: str) -> Path:
-    matches = list(dataset.glob(f"videos/chunk-*/observation.images.{camera}/*.mp4"))
+def _video_path(dataset: Path, camera: str, episode_index: int) -> Path:
+    matches = list(
+        dataset.glob(
+            f"videos/chunk-*/observation.images.{camera}/"
+            f"episode_{episode_index:06d}.mp4"
+        )
+    )
     if len(matches) != 1:
-        raise RuntimeError(f"expected one {camera} video, found {len(matches)}")
+        raise RuntimeError(
+            f"expected one {camera} video for episode {episode_index}, "
+            f"found {len(matches)}"
+        )
     return matches[0]
 
 
@@ -134,11 +148,24 @@ def main() -> None:
     dataset = args.dataset.resolve()
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    rows = [
+    all_rows = [
         json.loads(line)
         for line in (dataset / "bell_keypoints.jsonl").read_text().splitlines()
         if line.strip()
     ]
+    rows = [
+        row for row in all_rows if row["episode_index"] == args.episode_index
+    ]
+    rows.sort(key=lambda row: row["frame_index"])
+    if not rows:
+        raise RuntimeError(f"no labels found for episode {args.episode_index}")
+    expected_indices = list(range(len(rows)))
+    actual_indices = [row["frame_index"] for row in rows]
+    if actual_indices != expected_indices:
+        raise RuntimeError(
+            f"episode {args.episode_index} has non-contiguous frame indices: "
+            f"{actual_indices[:5]}..."
+        )
     sheet_indices = [int(value) for value in args.sheet_frames.split(",")]
     ffmpeg = _ffmpeg()
 
@@ -155,7 +182,7 @@ def main() -> None:
                 "-loglevel",
                 "error",
                 "-i",
-                str(_video_path(dataset, camera)),
+                str(_video_path(dataset, camera, args.episode_index)),
                 str(raw_dir / "%06d.png"),
             )
             frame_paths = sorted(raw_dir.glob("*.png"))
