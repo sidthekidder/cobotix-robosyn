@@ -401,3 +401,38 @@ that can prevent the same failure on a fresh pod.
   audit found valid camera video and geometry labels.
 - **Resolution:** Keep Vulkan enabled and use the successful render/audit gates
   as the source of truth. Do not abort solely on these warnings.
+
+## 2026-10-01: Prebuilt image ACT packages were newer than the trainer API
+
+- **Symptom:** The ACT smoke initially failed because LeRobot 0.4.4 no longer
+  provides `lerobot.scripts.train`. After pinning LeRobot, dataset creation
+  failed when Datasets 4.8.5 returned a `Column` to `torch.stack`.
+- **Resolution:** Install LeRobot from commit
+  `b883328e6c95681ca90a18b102e4ae5e1f91e2bf` editable with `--no-deps`, then
+  install `datasets==3.6.0`. This preserves the image's working CUDA and DexSim
+  packages while restoring the exact ACT training API.
+- **Prevention:** Before transferring a training dataset, preflight imports for
+  `lerobot.scripts.train` and print the LeRobot, Datasets, PyTorch, and
+  torchvision versions. Enforce LeRobot's declared `datasets<=3.6.0` bound.
+
+## 2026-10-01: AMP produced a NaN gradient norm on the mixed ACT stack
+
+- **Symptom:** A one-update ACT probe with AMP completed with finite loss but
+  reported `grdn:nan` under PyTorch 2.10.0 and LeRobot 0.3.3.
+- **Resolution:** Disable AMP for the integration smoke. The next probe and all
+  10 final updates had finite gradient norms from 2.945 to 17.147 and finite
+  press-point auxiliary losses.
+- **Prevention:** Treat finite total loss as insufficient. Run one update and
+  require a finite gradient norm before a long job. Use the fully pinned ACT
+  stack (`torch<2.8`) for AMP, or keep AMP disabled on this prebuilt image.
+
+## 2026-10-01: Uncached public image startup dominated the smoke-test cost
+
+- **Evidence:** `dpaleyev/robosyn-groot:v1` spent about 27 minutes pulling and
+  extracting before the container started; the final 10-update ACT smoke then
+  finished in 17 seconds including setup.
+- **Resolution:** Complete transfers, compatibility probes, the bounded run,
+  and artifact download in one container lifetime, then terminate it. The final
+  audit found zero pods, network volumes, or endpoints.
+- **Prevention:** Prefer a cached host or a smaller ACT-only image for training.
+  Reserve the 56 GB simulator image for jobs that actually need DexSim/Vulkan.
