@@ -27,6 +27,75 @@ def _distance(left: list[float], right: list[float]) -> float:
     return math.hypot(left[0] - right[0], left[1] - right[1])
 
 
+def _video_inventory(
+    dataset: Path, camera: str, episode_indices: set[int]
+) -> tuple[int, int, list[str]]:
+    """Return logical episodes, physical files, and validation errors.
+
+    LeRobot 2.x writes one MP4 per episode. LeRobot 3.x/0.4.x packs many
+    episodes into file-*.mp4 and records each episode's byte-stream location
+    and timestamps in meta/episodes parquet files.
+    """
+    legacy = list(
+        dataset.glob(f"videos/chunk-*/observation.images.{camera}/*.mp4")
+    )
+    if legacy:
+        errors = []
+        if len(legacy) != len(episode_indices):
+            errors.append(
+                f"{camera} has {len(legacy)} videos for {len(episode_indices)} episodes"
+            )
+        if any(video.stat().st_size == 0 for video in legacy):
+            errors.append(f"{camera} contains an empty video")
+        return len(legacy), len(legacy), errors
+
+    metadata_files = sorted(dataset.glob("meta/episodes/chunk-*/file-*.parquet"))
+    if not metadata_files:
+        return 0, 0, [f"{camera} has no videos or episode video metadata"]
+
+    import pyarrow.parquet as pq
+
+    prefix = f"videos/observation.images.{camera}"
+    columns = [
+        "episode_index",
+        f"{prefix}/chunk_index",
+        f"{prefix}/file_index",
+        f"{prefix}/from_timestamp",
+        f"{prefix}/to_timestamp",
+    ]
+    records: list[dict[str, Any]] = []
+    for metadata_file in metadata_files:
+        table = pq.read_table(metadata_file, columns=columns)
+        records.extend(table.to_pylist())
+
+    errors = []
+    recorded_indices = {int(record["episode_index"]) for record in records}
+    if recorded_indices != episode_indices:
+        errors.append(
+            f"{camera} episode metadata {sorted(recorded_indices)} does not match "
+            f"labels {sorted(episode_indices)}"
+        )
+    referenced: set[Path] = set()
+    for record in records:
+        start = float(record[f"{prefix}/from_timestamp"])
+        end = float(record[f"{prefix}/to_timestamp"])
+        if not end > start:
+            errors.append(
+                f"{camera} episode {record['episode_index']} has invalid timestamps"
+            )
+        video = (
+            dataset
+            / f"videos/observation.images.{camera}"
+            / f"chunk-{int(record[f'{prefix}/chunk_index']):03d}"
+            / f"file-{int(record[f'{prefix}/file_index']):03d}.mp4"
+        )
+        referenced.add(video)
+    missing = [path for path in referenced if not path.is_file() or path.stat().st_size == 0]
+    if missing:
+        errors.append(f"{camera} has {len(missing)} missing or empty packed videos")
+    return len(records), len(referenced), errors
+
+
 def _camera_summary(rows: list[dict[str, Any]], camera: str, index: int) -> dict[str, Any]:
     legacy_visible = sum(row["keypoints"][index][2] > 0.5 for row in rows)
     result: dict[str, Any] = {
@@ -105,13 +174,14 @@ def audit(dataset: Path) -> dict[str, Any]:
 
     cameras = list(manifest["cameras"])
     video_counts = {}
+    video_file_counts = {}
     for camera in cameras:
-        videos = list(dataset.glob(f"videos/chunk-*/observation.images.{camera}/*.mp4"))
-        video_counts[camera] = len(videos)
-        if len(videos) != len(grouped):
-            errors.append(f"{camera} has {len(videos)} videos for {len(grouped)} episodes")
-        if any(video.stat().st_size == 0 for video in videos):
-            errors.append(f"{camera} contains an empty video")
+        logical_count, file_count, video_errors = _video_inventory(
+            dataset, camera, set(grouped)
+        )
+        video_counts[camera] = logical_count
+        video_file_counts[camera] = file_count
+        errors.extend(video_errors)
 
     saved_attempts = [attempt for attempt in manifest["attempts"] if attempt["saved"]]
     episode_cells = {
@@ -149,6 +219,7 @@ def audit(dataset: Path) -> dict[str, Any]:
         "attempts": len(manifest["attempts"]),
         "cell_counts": dict(sorted(actual_cells.items())),
         "video_counts": video_counts,
+        "video_file_counts": video_file_counts,
         "cameras": camera_summary,
         "per_cell": per_cell,
         "errors": errors,

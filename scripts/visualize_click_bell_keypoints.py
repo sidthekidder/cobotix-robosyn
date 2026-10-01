@@ -53,19 +53,58 @@ def _ffmpeg() -> str:
         ) from error
 
 
-def _video_path(dataset: Path, camera: str, episode_index: int) -> Path:
+def _video_segment(
+    dataset: Path, camera: str, episode_index: int
+) -> tuple[Path, float | None, float | None]:
     matches = list(
         dataset.glob(
             f"videos/chunk-*/observation.images.{camera}/"
             f"episode_{episode_index:06d}.mp4"
         )
     )
-    if len(matches) != 1:
+    if len(matches) == 1:
+        return matches[0], None, None
+    if matches:
         raise RuntimeError(
             f"expected one {camera} video for episode {episode_index}, "
             f"found {len(matches)}"
         )
-    return matches[0]
+
+    import pyarrow.parquet as pq
+
+    prefix = f"videos/observation.images.{camera}"
+    columns = [
+        "episode_index",
+        f"{prefix}/chunk_index",
+        f"{prefix}/file_index",
+        f"{prefix}/from_timestamp",
+        f"{prefix}/to_timestamp",
+    ]
+    records = []
+    for metadata_file in sorted(dataset.glob("meta/episodes/chunk-*/file-*.parquet")):
+        records.extend(pq.read_table(metadata_file, columns=columns).to_pylist())
+    matches = [
+        record for record in records if int(record["episode_index"]) == episode_index
+    ]
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"expected one packed-video record for {camera} episode {episode_index}, "
+            f"found {len(matches)}"
+        )
+    record = matches[0]
+    video = (
+        dataset
+        / f"videos/observation.images.{camera}"
+        / f"chunk-{int(record[f'{prefix}/chunk_index']):03d}"
+        / f"file-{int(record[f'{prefix}/file_index']):03d}.mp4"
+    )
+    if not video.is_file():
+        raise RuntimeError(f"packed video does not exist: {video}")
+    return (
+        video,
+        float(record[f"{prefix}/from_timestamp"]),
+        float(record[f"{prefix}/to_timestamp"]),
+    )
 
 
 def _font(size: int) -> ImageFont.ImageFont:
@@ -176,15 +215,21 @@ def main() -> None:
             overlay_dir = temporary_root / camera / "overlay"
             raw_dir.mkdir(parents=True)
             overlay_dir.mkdir(parents=True)
-            _run(
+            video, start, _ = _video_segment(dataset, camera, args.episode_index)
+            extract_command = [
                 ffmpeg,
                 "-hide_banner",
                 "-loglevel",
                 "error",
                 "-i",
-                str(_video_path(dataset, camera, args.episode_index)),
-                str(raw_dir / "%06d.png"),
+                str(video),
+            ]
+            if start is not None:
+                extract_command.extend(["-ss", f"{start:.9f}"])
+            extract_command.extend(
+                ["-frames:v", str(len(rows)), str(raw_dir / "%06d.png")]
             )
+            _run(*extract_command)
             frame_paths = sorted(raw_dir.glob("*.png"))
             if len(frame_paths) != len(rows):
                 raise RuntimeError(
