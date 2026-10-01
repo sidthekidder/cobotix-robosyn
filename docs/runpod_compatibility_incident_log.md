@@ -25,6 +25,20 @@ that can prevent the same failure on a fresh pod.
 8. Run one policy-conditioned correction through dataset finalization before a
    full collection. Inspect its manifest and recorded frame count.
 
+## 2026-09-27: A40 host could not start the simulator container
+
+- **Symptom:** The image finished pulling, but the host repeatedly logged
+  `OCI runtime create failed ... can't get final child's PID from pipe: EOF`;
+  proxy SSH confirmed that the container was not running.
+- **Root cause:** Host container-runtime failure before project setup. No
+  experiment code ran.
+- **Resolution:** One in-place restart reproduced the failure, so pod
+  `ilyoznncnmoyun` was terminated. The account was verified to have zero pods
+  afterward.
+- **Prevention:** Gate all setup on successful SSH plus `nvidia-smi`. After one
+  restart reproduces this OCI error, terminate promptly and use another host;
+  do not spend time reinstalling software in a container that never started.
+
 ## 2026-09-27: Pod reported running before its container existed
 
 - **Symptom:** The control plane reported `RUNNING`, while proxy SSH returned
@@ -191,3 +205,98 @@ that can prevent the same failure on a fresh pod.
 - **Prevention:** Disable macOS metadata when creating transfer archives or
   filter `._*` files immediately after extraction. Always count canonical
   dataset objects before training.
+
+## 2026-09-27: Research audit — short recovery clips change ACT loss weighting
+
+- **Finding:** The latest corrections have 20 frames per episode versus a
+  50-action ACT horizon. Uniformly sampling their frames yields 10.5 valid
+  target actions on average. LeRobot 0.3.3 masks padding but averages L1 over
+  all positions; KL remains per-sample. A 5% sampling share is therefore not
+  a 5% share of unmasked action supervision.
+- **Status:** Structural behavior confirmed from dataset metadata and upstream
+  source. Its effect on rollout success has not been measured; no loss patch
+  has been applied.
+- **Prevention:** Log valid-target counts and source-specific L1/KL before
+  mixing different episode lengths. Test any loss-normalization change as an
+  explicit ablation. Do not convert padding to labels without real simulated
+  continuation steps.
+
+## 2026-09-27: Research audit — reconstructed recovery state is incomplete
+
+- **Finding:** The collector resets the scene, restores policy-reached qpos,
+  then sets its rollout counter to zero. It does not explicitly restore the
+  original velocity/contact/object state or randomization/event state.
+- **Status:** Confirmed code behavior, not a proven cause of poor training.
+- **Prevention:** Replay the policy prefix with recording disabled and enable
+  recording at intervention, or validate a full simulator snapshot restore.
+  Compare observation/state at the handover before calling data exact on-policy
+  corrections.
+
+## 2026-09-27: Research audit — same seeds have differing appearance histories
+
+- **Finding:** Paired saved videos for seeds 1136257699, 1879422756 and
+  352272321 show different later material/light appearances between the 5K
+  baseline and correction pilot. Initial scenes look similar. The evaluations
+  used an A40 and an A6000 respectively. Local contact sheets are under
+  `artifacts/research/2026-09-27/`.
+- **Status:** Visual discrepancy observed; its source and outcome impact are
+  unresolved. Do not infer that either model benefited from it.
+- **Prevention:** Compare identical action replays and identical-policy runs in
+  fresh/reordered episodes. Record environment versions and event timelines,
+  separate model/environment RNGs, and establish paired reproducibility or
+  report repeated-run variability before interpreting small score differences.
+## CUDA trajectory conversion in ClickBell expert collection
+
+- **Symptom:** demonstration collection stopped at `Generating edges: 0%` and exited with status 0.
+- **Hidden error:** `TypeError: can't convert cuda:0 device type tensor to numpy` in `click_bell/action_bank.py`.
+- **Why the traceback disappeared:** EmbodiChain's default `SimulationManager.destroy()` calls `os._exit(0)` during `env.close()`, masking an exception raised before teardown.
+- **Diagnosis:** rerun with `EMBODICHAIN_SIM_EXIT_PROCESS=0` to retain the Python traceback. The process may segfault later during native simulator teardown; the earlier traceback is the useful signal.
+- **Fix:** convert the generated trajectory with `ret.positions[0].detach().cpu().numpy().T`.
+
+## 2026-09-28: Custom DexSim image did not start an SSH daemon
+
+- **Symptom:** RunPod reported a live runtime and published TCP port 22, but the
+  direct endpoint returned `Connection refused`; proxy authentication succeeded
+  without yielding a shell.
+- **Root cause:** `dexforce/embodichain:ubuntu22.04-cuda12.8` did not contain a
+  running SSH daemon under the configured `sleep infinity` command.
+- **Resolution:** Update the pod command to install `openssh-server` when
+  absent, write `$PUBLIC_KEY` to `/root/.ssh/authorized_keys`, generate host
+  keys, and execute `/usr/sbin/sshd -D -e`. After restarting, use the newly
+  assigned direct TCP port rather than the stale pre-restart port.
+- **Prevention:** Require both `Server listening on ... port 22` in container
+  logs and a successful direct SSH probe. Refresh `get-pod` after every restart
+  because the public TCP port can change.
+
+## 2026-09-28: Community RTX 3090 exposed graphics but broken CUDA compute
+
+- **Symptom:** `nvidia-smi` reported an RTX 3090 and `vulkaninfo` selected the
+  NVIDIA proprietary device, while PyTorch reported `CUDA unknown error`.
+  Direct `ctypes.CDLL("libcuda.so.1").cuInit(0)` returned error 999.
+- **Root cause:** Host-level CUDA driver/device attachment failure. The expected
+  `/dev/nvidia*` nodes existed, so this was below the Python environment. An
+  in-place container restart reproduced the failure.
+- **Resolution:** Terminate the unusable pod after preserving no experiment
+  results. Do not reinstall PyTorch or DexSim when the driver-level `cuInit`
+  preflight already fails.
+- **Prevention:** Run `cuInit(0)` and `torch.cuda.is_available()` immediately
+  after SSH becomes available, before downloading policy dependencies or
+  datasets. Treat Vulkan rendering, NVML, and CUDA compute as separate gates.
+
+## 2026-09-30: Secure A40 retry passed the keypoint-collector smoke test
+
+- **Evidence:** Secure pod `v9l89rnnwmwmbb` passed `cuInit(0) == 0`, PyTorch
+  2.7.1+cu126 reported CUDA available on an NVIDIA A40, and Vulkan selected the
+  proprietary A40 device. Source commit `9c1b210` and EmbodiChain commit
+  `9ebee30011f378f94a7cbe78b01d8c2eacba231a` ran with LeRobot 0.3.3.
+- **Result:** A one-cell, one-episode keypoint collection saved and finalized
+  one 74-frame LeRobot episode. Validation found 74 parquet frames, 74 ordered
+  keypoint rows, and three nonempty camera videos. The high camera saw the
+  button in all 74 frames, the right-wrist camera in 60, and the left-wrist
+  camera in none for this scene.
+- **Cost note:** The uncached DexSim image took about 11 minutes to pull and
+  extract before the container started. The pod used ephemeral storage, the
+  3 MB smoke artifact was copied locally, and the pod was terminated. A final
+  audit found zero pods, network volumes, or serverless endpoints.
+- **Artifact:** `artifacts/keypoint_smoke/20260930/keypoint_smoke_9c1b210.tar.gz`
+  (SHA256 `a87ddd80bca1c4fae3e117981172bcdf21bf2fab8cf4c23f90797f0c589a3dbd`).

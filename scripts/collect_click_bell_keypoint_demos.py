@@ -21,6 +21,13 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 CAMERAS = ("cam_high", "cam_right_wrist", "cam_left_wrist")
+GEOMETRY_CAMERAS = ("cam_high", "cam_right_wrist")
+
+# These offsets come from the pinned simulator assets. The button-cover visual
+# mesh reaches z=0.02904 m in button_cover coordinates, and CobotMagic's
+# right-arm OPW solver defines its TCP 0.143 m along right_link6 local +Z.
+BUTTON_PRESS_SURFACE_OFFSET_M = 0.02904
+RIGHT_TCP_OFFSET_M = 0.143
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -73,22 +80,201 @@ def _button_visual_ids(base: Any) -> np.ndarray:
     return values.astype(np.int64)
 
 
-def _keypoints(obs: dict[str, Any], visual_ids: np.ndarray) -> list[list[float]]:
-    result: list[list[float]] = []
-    for camera in CAMERAS:
-        mask = _as_numpy(obs["sensor"][camera]["mask"])[0]
-        if mask.ndim == 3:
-            mask = mask[..., 0]
-        pixels = np.argwhere(np.isin(mask, visual_ids))
-        if len(pixels) == 0:
-            result.append([0.5, 0.5, 0.0])
-            continue
-        height, width = mask.shape
-        y, x = pixels.mean(axis=0)
-        result.append(
-            [float(x / max(width - 1, 1)), float(y / max(height - 1, 1)), 1.0]
+def _camera_mask(obs: dict[str, Any], camera: str) -> np.ndarray:
+    mask = _as_numpy(obs["sensor"][camera]["mask"])[0]
+    if mask.ndim == 3:
+        mask = mask[..., 0]
+    if mask.ndim != 2:
+        raise ValueError(
+            f"{camera} mask must be 2-D after channel selection, got {mask.shape}"
         )
-    return result
+    return mask
+
+
+def _mask_measurements(mask: np.ndarray, visual_ids: np.ndarray) -> dict[str, Any]:
+    """Measure the visible button mask without inferring physical geometry."""
+
+    selected = np.isin(mask, visual_ids)
+    pixels = np.argwhere(selected)
+    height, width = mask.shape
+    count = int(len(pixels))
+    if count == 0:
+        return {
+            "centroid": [0.5, 0.5],
+            "visible": False,
+            "area_pixels": 0,
+            "area_fraction": 0.0,
+            "bbox_xyxy_pixels": None,
+            "bbox_xyxy_normalized": None,
+            "touches_image_boundary": False,
+        }
+
+    y, x = pixels.mean(axis=0)
+    y_min, x_min = pixels.min(axis=0)
+    y_max, x_max = pixels.max(axis=0)
+    x_scale = max(width - 1, 1)
+    y_scale = max(height - 1, 1)
+    return {
+        "centroid": [float(x / x_scale), float(y / y_scale)],
+        "visible": True,
+        "area_pixels": count,
+        "area_fraction": float(count / mask.size),
+        "bbox_xyxy_pixels": [int(x_min), int(y_min), int(x_max), int(y_max)],
+        "bbox_xyxy_normalized": [
+            float(x_min / x_scale),
+            float(y_min / y_scale),
+            float(x_max / x_scale),
+            float(y_max / y_scale),
+        ],
+        "touches_image_boundary": bool(
+            x_min == 0 or y_min == 0 or x_max == width - 1 or y_max == height - 1
+        ),
+    }
+
+
+def _project_world_point(
+    camera_pose_opengl: np.ndarray,
+    intrinsics: np.ndarray,
+    point_world: np.ndarray,
+    image_shape: tuple[int, int],
+) -> dict[str, Any]:
+    """Project one arena-frame point using DexSim's OpenGL camera convention."""
+
+    camera_pose_opencv = np.asarray(camera_pose_opengl, dtype=np.float64).copy()
+    camera_pose_opencv[:3, 1:3] *= -1.0
+    point_h = np.append(np.asarray(point_world, dtype=np.float64), 1.0)
+    point_camera = np.linalg.inv(camera_pose_opencv) @ point_h
+    depth = float(point_camera[2])
+    in_front = depth > 1e-8
+    if in_front:
+        pixel_h = np.asarray(intrinsics, dtype=np.float64) @ (
+            point_camera[:3] / depth
+        )
+        x_pixel, y_pixel = float(pixel_h[0]), float(pixel_h[1])
+    else:
+        x_pixel = y_pixel = None
+
+    height, width = image_shape
+    in_frame = bool(
+        in_front
+        and x_pixel is not None
+        and y_pixel is not None
+        and 0.0 <= x_pixel <= width - 1
+        and 0.0 <= y_pixel <= height - 1
+    )
+    return {
+        "xy_normalized": [
+            float(x_pixel / max(width - 1, 1)),
+            float(y_pixel / max(height - 1, 1)),
+        ] if in_front else None,
+        "xy_pixels": [x_pixel, y_pixel],
+        "depth_m": depth,
+        "in_front": bool(in_front),
+        "in_frame": in_frame,
+    }
+
+
+def _point_on_mask(
+    mask: np.ndarray,
+    visual_ids: np.ndarray,
+    xy_pixels: list[float] | None,
+    radius_pixels: int = 2,
+) -> bool:
+    if xy_pixels is None or not np.isfinite(xy_pixels).all():
+        return False
+    x, y = (int(round(value)) for value in xy_pixels)
+    height, width = mask.shape
+    x0, x1 = max(0, x - radius_pixels), min(width, x + radius_pixels + 1)
+    y0, y1 = max(0, y - radius_pixels), min(height, y + radius_pixels + 1)
+    return bool(
+        x0 < x1
+        and y0 < y1
+        and np.isin(mask[y0:y1, x0:x1], visual_ids).any()
+    )
+
+
+def _transform_point(pose: np.ndarray, local_xyz: list[float]) -> np.ndarray:
+    return (np.asarray(pose) @ np.asarray([*local_xyz, 1.0]))[:3]
+
+
+def _physical_points(base: Any) -> dict[str, np.ndarray]:
+    button = base.sim.get_articulation("button")
+    cover_pose = _as_numpy(
+        button.get_link_pose("button_cover", to_matrix=True)
+    ).reshape(-1, 4, 4)[0]
+    right_link6_pose = _as_numpy(
+        base.robot.get_link_pose("right_link6", to_matrix=True)
+    ).reshape(-1, 4, 4)[0]
+    return {
+        "press_point": _transform_point(
+            cover_pose, [0.0, 0.0, BUTTON_PRESS_SURFACE_OFFSET_M]
+        ),
+        "right_tool_tip": _transform_point(
+            right_link6_pose, [0.0, 0.0, RIGHT_TCP_OFFSET_M]
+        ),
+    }
+
+
+def _frame_labels(
+    base: Any, obs: dict[str, Any], visual_ids: np.ndarray
+) -> tuple[list[list[float]], dict[str, Any]]:
+    """Return legacy centroid labels and richer training-only geometry."""
+
+    masks = {camera: _camera_mask(obs, camera) for camera in CAMERAS}
+    mask_data = {
+        camera: _mask_measurements(mask, visual_ids)
+        for camera, mask in masks.items()
+    }
+    keypoints = [
+        [*mask_data[camera]["centroid"], float(mask_data[camera]["visible"])]
+        for camera in CAMERAS
+    ]
+
+    points = _physical_points(base)
+    geometry: dict[str, Any] = {}
+    for camera in GEOMETRY_CAMERAS:
+        sensor = base.sim.get_sensor(camera)
+        if sensor is None:
+            raise RuntimeError(f"camera sensor {camera!r} is unavailable")
+        camera_pose = _as_numpy(
+            sensor.get_arena_pose(to_matrix=True)
+        ).reshape(-1, 4, 4)[0]
+        intrinsics = _as_numpy(sensor.get_intrinsics()).reshape(-1, 3, 3)[0]
+        mask = masks[camera]
+        projected = {
+            name: _project_world_point(camera_pose, intrinsics, point, mask.shape)
+            for name, point in points.items()
+        }
+        press_on_mask = _point_on_mask(
+            mask, visual_ids, projected["press_point"]["xy_pixels"]
+        )
+        reliable = bool(
+            mask_data[camera]["visible"]
+            and not mask_data[camera]["touches_image_boundary"]
+            and projected["press_point"]["in_frame"]
+            and press_on_mask
+        )
+        press_xy = projected["press_point"]["xy_normalized"]
+        tip_xy = projected["right_tool_tip"]["xy_normalized"]
+        relative_xy = (
+            [
+                float(press_xy[0] - tip_xy[0]),
+                float(press_xy[1] - tip_xy[1]),
+            ]
+            if press_xy is not None and tip_xy is not None
+            else None
+        )
+        geometry[camera] = {
+            "mask": mask_data[camera],
+            "press_point": projected["press_point"],
+            "right_tool_tip": projected["right_tool_tip"],
+            "tool_to_press_delta_normalized": relative_xy,
+            "press_point_visible_in_mask": press_on_mask,
+            # Conservative: reject absent, truncated, off-screen, and
+            # center-occluded centroid labels.
+            "mask_centroid_confidence": float(reliable),
+        }
+    return keypoints, geometry
 
 
 def _cell(position: list[float], args: argparse.Namespace) -> tuple[int, int]:
@@ -224,10 +410,10 @@ def _collect(args: argparse.Namespace) -> None:
                 attempts.append(record)
                 continue
             visual_ids = _button_visual_ids(base)
-            frame_labels: list[list[list[float]]] = []
+            frame_labels: list[tuple[list[list[float]], dict[str, Any]]] = []
             for action in actions:
                 obs, *_ = env.step(action)
-                frame_labels.append(_keypoints(obs, visual_ids))
+                frame_labels.append(_frame_labels(base, obs, visual_ids))
             success = _is_success(env)
             episode_index = int(recorder.curr_episode)
             next_seed = int(rng.integers(0, 2**31 - 1))
@@ -239,12 +425,13 @@ def _collect(args: argparse.Namespace) -> None:
             if not saved:
                 continue
             counts[cell] += 1
-            for frame_index, label in enumerate(frame_labels):
+            for frame_index, (keypoints, geometry) in enumerate(frame_labels):
                 sidecar_rows.append(
                     {
                         "episode_index": episode_index,
                         "frame_index": frame_index,
-                        "keypoints": label,
+                        "keypoints": keypoints,
+                        "geometry": geometry,
                     }
                 )
             progress.update(1)
@@ -256,11 +443,28 @@ def _collect(args: argparse.Namespace) -> None:
             for row in sidecar_rows:
                 handle.write(json.dumps(row, separators=(",", ":")) + "\n")
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "task": "click_bell",
             "collection_type": "bell_keypoint_balanced",
             "cameras": list(CAMERAS),
             "coordinate_order": ["x_normalized", "y_normalized", "visible"],
+            "geometry_cameras": list(GEOMETRY_CAMERAS),
+            "geometry": {
+                "camera_pose_convention": "OpenGL converted to OpenCV for projection",
+                "press_point": {
+                    "link": "button_cover",
+                    "local_xyz_m": [0.0, 0.0, BUTTON_PRESS_SURFACE_OFFSET_M],
+                },
+                "right_tool_tip": {
+                    "link": "right_link6",
+                    "local_xyz_m": [0.0, 0.0, RIGHT_TCP_OFFSET_M],
+                },
+                "mask_centroid_confidence": (
+                    "1 iff mask is visible, does not touch an image boundary, "
+                    "the projected press point is in-frame, and button-mask pixels "
+                    "occur within 2 pixels of it; otherwise 0"
+                ),
+            },
             "legacy_lerobot_recorder_compat": recorder_compat,
             "grid": {"x": args.grid_x, "y": args.grid_y},
             "excluded_cells": [list(cell) for cell in sorted(excluded_cells)],
