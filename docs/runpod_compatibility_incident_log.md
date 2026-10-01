@@ -338,3 +338,66 @@ that can prevent the same failure on a fresh pod.
 - **Related setup correction:** The public source repository is
   `https://github.com/DexForce/EmbodiChain.git`; `EmbodiChain/EmbodiChain` is
   not the clone URL.
+
+## 2026-10-01: Public simulator image recovered the package-host outage
+
+- **Symptom:** Fresh installation remained blocked because the private
+  `dexsim-engine==0.4.3` wheel host was still unreachable.
+- **Resolution:** Use `dpaleyev/robosyn-groot:v1`, which already contains
+  DexSim 0.4.3, EmbodiChain 0.2.4, PyTorch 2.10.0+cu128, and LeRobot 0.4.4.
+  Install the pinned RoboSynChallenge and EmbodiChain source trees editable
+  with `--no-deps` so the image's working simulator stack is preserved.
+- **Cost note:** This image is about 56 GB and took roughly 14 minutes to pull
+  and unpack on an uncached Secure A40 host. Budget that startup time before
+  provisioning, and reuse a stopped container only when its disk cost is
+  justified.
+- **Prevention:** Probe the private wheel host first. If it fails, select the
+  prebuilt image immediately and verify its package versions before changing
+  anything in the environment.
+
+## 2026-10-01: Stale Kitware apt key prevented SSH bootstrap
+
+- **Symptom:** The prebuilt image restarted before SSH became available because
+  `apt-get update` rejected an expired or unavailable Kitware repository key.
+- **Resolution:** Remove `/etc/apt/sources.list.d/*kitware*` before installing
+  `openssh-server`; the workload does not require that repository at runtime.
+- **Prevention:** Put this cleanup in the pod startup command for this exact
+  image, and make the SSH install conditional on `command -v sshd`.
+
+## 2026-10-01: LeRobot 0.4.4 packs multiple episodes into shared videos
+
+- **Symptom:** The collector saved valid demonstrations, but the original audit
+  and visualizer looked for one `episode_*.mp4` per episode and reported videos
+  as missing.
+- **Root cause:** LeRobot 0.4.4 stores all episodes in a camera's
+  `videos/.../chunk-000/file-000.mp4` and records each episode's timestamp
+  window in `meta/episodes/chunk-000/file-000.parquet`.
+- **Resolution:** Commit `0068cec` makes the audit distinguish logical episode
+  records from physical video files and makes the visualizer decode exactly the
+  frame count in the selected episode's timestamp window.
+- **Prevention:** Inspect `meta/info.json` and the episode metadata before
+  assuming a filesystem layout. Audit both logical coverage and the existence
+  of every referenced physical file.
+
+## 2026-10-01: Far-positive ClickBell cell is outside the expert's practical reach
+
+- **Symptom:** A balanced 3x3 collection filled eight cells but never saved
+  cell `(2,2)` after 500 total attempts.
+- **Evidence:** Cell `(2,2)` was sampled 53 times across x
+  `[0.70451927, 0.84650952]` m and y `[0.10816976, 0.28698635]` m. Every sample
+  failed expert planning; none reached recording.
+- **Resolution:** Collect a truthful eight-cell pilot with `(2,2)` excluded in
+  the manifest. The clean run produced eight 74-frame episodes and passed the
+  audit with 592 frames and no errors.
+- **Prevention:** Run a cheap expert-feasibility sweep before assigning balanced
+  quotas. Distinguish unreachable expert geometry from policy failure and keep
+  excluded cells explicit in the dataset manifest.
+
+## 2026-10-01: Renderer initialization warnings were non-fatal
+
+- **Symptom:** DexSim printed warnings about distractor placeholders and an
+  unrecognized A40 renderer profile during initialization.
+- **Evidence:** Vulkan/Hybrid initialized, all eight episodes rendered, and the
+  audit found valid camera video and geometry labels.
+- **Resolution:** Keep Vulkan enabled and use the successful render/audit gates
+  as the source of truth. Do not abort solely on these warnings.
