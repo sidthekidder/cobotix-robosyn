@@ -267,6 +267,10 @@ that can prevent the same failure on a fresh pod.
 - **Prevention:** Require both `Server listening on ... port 22` in container
   logs and a successful direct SSH probe. Refresh `get-pod` after every restart
   because the public TCP port can change.
+- **2026-10-01 confirmation:** RunPod's `startSsh` flag alone did not keep this
+  custom image running because its default command exited. Set the SSH-daemon
+  entrypoint/command at pod creation; otherwise the already-downloaded image
+  can be repaired with one command update and restart.
 
 ## 2026-09-28: Community RTX 3090 exposed graphics but broken CUDA compute
 
@@ -300,3 +304,17 @@ that can prevent the same failure on a fresh pod.
   audit found zero pods, network volumes, or serverless endpoints.
 - **Artifact:** `artifacts/keypoint_smoke/20260930/keypoint_smoke_9c1b210.tar.gz`
   (SHA256 `a87ddd80bca1c4fae3e117981172bcdf21bf2fab8cf4c23f90797f0c589a3dbd`).
+
+## 2026-10-01: Interactive proxy SSH let FFmpeg consume queued shell commands
+
+- **Symptom:** Commands following the overlay renderer in a piped proxy-SSH
+  session were interpreted by FFmpeg instead of the remote shell, so archive
+  creation did not run.
+- **Root cause:** FFmpeg inherited the interactive SSH stream as standard input.
+- **Resolution:** Re-run the renderer with `</dev/null`, then package the
+  dataset and overlays. The transferred archive checksum matched the remote
+  checksum.
+- **Prevention:** Detach stdin for every FFmpeg/media subprocess in a queued
+  proxy-SSH session. RunPod proxy SSH does not support the SFTP subsystem, so
+  use authenticated `runpodctl` transfer when available or a checksummed
+  base64 stream for small emergency artifacts.

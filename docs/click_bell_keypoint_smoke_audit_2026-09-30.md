@@ -62,12 +62,36 @@ each live camera's randomized pose and intrinsics on every frame.
 
 Unit coverage verifies the DexSim OpenGL camera conversion, off-screen and
 behind-camera flags, mask truncation, rasterized press-point lookup, schema
-serialization, and coexistence with the legacy labels. A new RunPod smoke is
-still required to validate those source-derived conventions against rendered
-pixels before collecting a larger dataset.
+serialization, and coexistence with the legacy labels. The following live
+smoke validates those source-derived conventions against rendered pixels.
+
+## Schema-v2 live validation — 2026-10-01
+
+Commit `516ea4e` completed a second one-episode Secure A40 smoke. The resulting
+dataset has 74 frames, 74 strict-JSON sidecar rows, schema version 2, and three
+complete videos. The source-derived projections agree with the rendered robot
+and bell geometry:
+
+- `cam_high`: the press point is in-frame for 74/74 frames, the tool tip for
+  55/74, and 63/74 mask-centroid labels receive confidence 1. The other 11 are
+  rejected when the press-point neighborhood becomes occluded.
+- `cam_right_wrist`: the visible button mask exists in 60/74 frames, touches an
+  image boundary in 25, the physical press point is in-frame in 54, and the
+  tool tip is in-frame in all 74. The conservative confidence accepts 32/74.
+- The old whole-articulation mask centroid differs from the projected physical
+  point by a median 8.3 pixels in the high camera and 27.6 pixels in the moving
+  wrist camera. The overlays show why the physical point is preferable: the
+  wrist view has strong perspective, truncation, and contact occlusion while
+  the projected point remains tied to the moving cover surface.
+
+This validates collection and projection conventions for a small multi-cell
+pilot. It does not yet validate an auxiliary-loss formulation or policy gain.
 
 ## Artifacts
 
 - Full overlays: `artifacts/keypoint_smoke/20260930/overlays/`
 - Contact-window sheets: `artifacts/keypoint_smoke/20260930/contact_window/`
 - Reusable renderer: `scripts/visualize_click_bell_keypoints.py`
+- Schema-v2 archive:
+  `artifacts/keypoint_smoke/20261001/keypoint_geometry_smoke_516ea4e.tar.gz`
+  (SHA256 `c1f27587e367370edf60bc326ad8329a9b000cc666c5d7efce062d435ba6140b`)
