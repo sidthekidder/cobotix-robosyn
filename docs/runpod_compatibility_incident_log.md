@@ -379,6 +379,33 @@ that can prevent the same failure on a fresh pod.
   assuming a filesystem layout. Audit both logical coverage and the existence
   of every referenced physical file.
 
+## 2026-10-02: `setsid` reports a wrapper PID, not the detached collector PID
+
+- **Symptom:** The PID captured from `setsid bash -lc '...' &` exited within
+  seconds, while the collection log was initially empty, which looked like an
+  immediate launch failure.
+- **Root cause:** `setsid` forked a session child. The recorded PID belonged to
+  the short-lived wrapper; the detached bash, `conda run`, and Python collector
+  continued under different PIDs and were adopted by PID 1.
+- **Resolution:** Check the exact collector command with `pgrep -af` and inspect
+  GPU memory before relaunching. In this run, the real Python process was
+  healthy and completed all 80 episodes.
+- **Prevention:** Write the collector's own PID from inside the detached shell,
+  or monitor a completion sentinel plus an exact command match. Do not infer
+  workload failure solely from the outer `setsid` PID disappearing.
+
+## 2026-10-02: prebuilt simulator image startup remained the dominant fixed cost
+
+- **Evidence:** `dpaleyev/robosyn-groot:v1` took about 22 minutes to download
+  and unpack on a fresh Secure A40 host before the container started. The
+  balanced 80-episode collection then took 37 minutes 47 seconds.
+- **Resolution:** Keep the image path because it avoids the unavailable private
+  DexSim package host, but budget its startup separately from experiment time.
+- **Prevention:** Batch compatible simulator-only collection work on one
+  validated pod after transferring each completed artifact. Terminate promptly
+  when no further simulator work is ready; retaining a stopped ephemeral
+  container is not available as durable storage.
+
 ## 2026-10-01: Far-positive ClickBell cell is outside the expert's practical reach
 
 - **Symptom:** A balanced 3x3 collection filled eight cells but never saved
