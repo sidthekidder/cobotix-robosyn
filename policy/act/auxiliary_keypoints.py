@@ -17,6 +17,7 @@ from torch import nn
 
 
 TARGET_KEY = "auxiliary.bell_keypoints"
+UNSUPERVISED_VISIBILITY = -1.0
 CAMERAS = ("cam_high", "cam_right_wrist", "cam_left_wrist")
 TARGET_MODES = ("mask-centroid", "press-point")
 
@@ -99,9 +100,16 @@ def load_keypoint_sidecar(
 class KeypointSidecarDataset(torch.utils.data.Dataset):
     """Add frame-aligned keypoint labels to a LeRobot dataset."""
 
-    def __init__(self, base_dataset: Any, labels: dict[tuple[int, int], torch.Tensor]):
+    def __init__(
+        self,
+        base_dataset: Any,
+        labels: dict[tuple[int, int], torch.Tensor],
+        allow_missing: bool = False,
+    ):
         self._base_dataset = base_dataset
         self._labels = labels
+        self._allow_missing = bool(allow_missing)
+        self._camera_count = int(next(iter(labels.values())).shape[0])
         self.meta = base_dataset.meta
 
     def __getattr__(self, name: str) -> Any:
@@ -120,10 +128,13 @@ class KeypointSidecarDataset(torch.utils.data.Dataset):
             self._scalar(item["episode_index"]),
             self._scalar(item["frame_index"]),
         )
-        try:
-            item[TARGET_KEY] = self._labels[key]
-        except KeyError as error:
-            raise KeyError(f"Missing bell keypoint label for frame {key}") from error
+        label = self._labels.get(key)
+        if label is None:
+            if not self._allow_missing:
+                raise KeyError(f"Missing bell keypoint label for frame {key}")
+            label = torch.zeros((self._camera_count, 3), dtype=torch.float32)
+            label[:, 2] = UNSUPERVISED_VISIBILITY
+        item[TARGET_KEY] = label
         return item
 
 
@@ -159,6 +170,7 @@ def keypoint_loss(
     visibility_losses = []
     for camera_index, (coordinates, visibility_logit) in enumerate(predictions):
         camera_target = target[:, camera_index].to(coordinates.device)
+        supervised = (camera_target[:, 2] >= 0).to(coordinates.dtype)
         visible = camera_target[:, 2].clamp(0, 1)
         per_sample = F.smooth_l1_loss(
             coordinates, camera_target[:, :2], reduction="none"
@@ -167,7 +179,13 @@ def keypoint_loss(
             (per_sample * visible).sum() / visible.sum().clamp_min(1.0)
         )
         visibility_losses.append(
-            F.binary_cross_entropy_with_logits(visibility_logit, visible)
+            (
+                F.binary_cross_entropy_with_logits(
+                    visibility_logit, visible, reduction="none"
+                )
+                * supervised
+            ).sum()
+            / supervised.sum().clamp_min(1.0)
         )
     coordinate_loss = torch.stack(coordinate_losses).mean()
     visibility_loss = torch.stack(visibility_losses).mean()

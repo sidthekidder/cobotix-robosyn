@@ -48,6 +48,32 @@ class AuxiliaryKeypointTests(unittest.TestCase):
             item = KeypointSidecarDataset(_Dataset(), labels)[0]
             self.assertEqual(item["auxiliary.bell_keypoints"].shape, (2, 3))
 
+    def test_missing_sidecar_frame_can_be_masked(self):
+        labels = {(0, 0): torch.ones((2, 3))}
+        item = KeypointSidecarDataset(_Dataset(), labels, allow_missing=True)[0]
+        self.assertTrue(torch.all(item["auxiliary.bell_keypoints"][:, 2] == -1))
+
+    def test_unsupervised_samples_do_not_affect_keypoint_loss(self):
+        head = SpatialKeypointHead(channels=4)
+        feature_map = torch.randn(2, 4, 5, 7, requires_grad=True)
+        predictions = [head(feature_map)]
+        target = torch.tensor(
+            [
+                [[0.2, 0.8, 1.0]],
+                [[0.0, 0.0, -1.0]],
+            ]
+        )
+        loss, _ = keypoint_loss(predictions, target)
+        loss.backward()
+        self.assertTrue(loss.isfinite())
+
+        single_predictions = [
+            (coordinates[:1], visibility[:1])
+            for coordinates, visibility in predictions
+        ]
+        single_loss, _ = keypoint_loss(single_predictions, target[:1])
+        torch.testing.assert_close(loss.detach(), single_loss.detach())
+
     def test_spatial_keypoint_loss_backpropagates(self):
         head = SpatialKeypointHead(channels=4)
         maps = [torch.randn(3, 4, 5, 7, requires_grad=True) for _ in range(2)]

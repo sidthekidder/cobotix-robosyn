@@ -179,6 +179,7 @@ def _patch_lerobot_dataset_factory(
     bell_keypoints_jsonl=None,
     bell_keypoint_loss_weight=0.0,
     bell_keypoint_target="mask-centroid",
+    allow_missing_bell_keypoints=False,
 ):
     import lerobot.scripts.train as train_module
 
@@ -202,10 +203,13 @@ def _patch_lerobot_dataset_factory(
             labels = load_keypoint_sidecar(
                 bell_keypoints_jsonl, target_mode=bell_keypoint_target
             )
-            dataset = KeypointSidecarDataset(dataset, labels)
+            dataset = KeypointSidecarDataset(
+                dataset, labels, allow_missing=allow_missing_bell_keypoints
+            )
             print(
                 f"[ACT train] Bell keypoint supervision: {len(labels)} labeled frames; "
-                f"target={bell_keypoint_target}; loss_weight={bell_keypoint_loss_weight}."
+                f"target={bell_keypoint_target}; loss_weight={bell_keypoint_loss_weight}; "
+                f"allow_missing={allow_missing_bell_keypoints}."
             )
         patched_state["dataset"] = dataset
         return dataset
@@ -332,6 +336,14 @@ def parse_args():
             "physical geometry labels."
         ),
     )
+    parser.add_argument(
+        "--allow-missing-bell-keypoints",
+        action="store_true",
+        help=(
+            "Keep frames absent from the sidecar for action training while masking "
+            "them out of the auxiliary keypoint loss."
+        ),
+    )
     parser.add_argument("--use-amp", action="store_true")
     parser.add_argument("--wandb", action="store_true")
     parser.add_argument("--wandb-project", default="robosynchallenge")
@@ -389,6 +401,7 @@ def main():
         bell_keypoints_jsonl=args.bell_keypoints_jsonl,
         bell_keypoint_loss_weight=args.bell_keypoint_loss_weight,
         bell_keypoint_target=args.bell_keypoint_target,
+        allow_missing_bell_keypoints=args.allow_missing_bell_keypoints,
     )
 
     policy_kwargs = {

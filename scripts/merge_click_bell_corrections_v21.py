@@ -225,6 +225,23 @@ def merge(args: argparse.Namespace) -> None:
     base_info["splits"] = {"train": f"0:{len(all_episodes)}"}
     (output / "meta/info.json").write_text(json.dumps(base_info, indent=2) + "\n")
 
+    if args.correction_keypoints_jsonl is not None:
+        keypoint_rows = _read_jsonl(args.correction_keypoints_jsonl)
+        remapped_rows = []
+        for row in keypoint_rows:
+            source_index = int(row["episode_index"])
+            if source_index < 0 or source_index >= len(correction_episodes):
+                raise ValueError(
+                    f"keypoint sidecar episode {source_index} is outside the corrective dataset"
+                )
+            remapped = dict(row)
+            remapped["episode_index"] = first_index + source_index
+            remapped_rows.append(remapped)
+        keypoint_output = args.output_keypoints_jsonl or (output / "bell_keypoints.jsonl")
+        keypoint_output.parent.mkdir(parents=True, exist_ok=True)
+        _write_jsonl(keypoint_output, remapped_rows)
+        print(f"Remapped {len(remapped_rows)} keypoint labels to {keypoint_output}")
+
     plan = _sampling_plan(
         base_episodes,
         appended_episodes,
@@ -249,6 +266,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-sampling-plan", type=Path)
     parser.add_argument("--output-sampling-plan", type=Path, required=True)
     parser.add_argument("--correction-sample-share", type=float, default=0.20)
+    parser.add_argument("--correction-keypoints-jsonl", type=Path)
+    parser.add_argument("--output-keypoints-jsonl", type=Path)
     return parser
 
 
