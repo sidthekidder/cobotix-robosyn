@@ -463,3 +463,41 @@ that can prevent the same failure on a fresh pod.
   audit found zero pods, network volumes, or endpoints.
 - **Prevention:** Prefer a cached host or a smaller ACT-only image for training.
   Reserve the 56 GB simulator image for jobs that actually need DexSim/Vulkan.
+
+## 2026-10-02: Raw pod `args` were interpreted as an executable named `command`
+
+- **Symptom:** After the image finished pulling, the container exited with
+  `/opt/nvidia/nvidia_entrypoint.sh: line 67: exec: command: not found`.
+- **Root cause:** The startup payload was supplied through the raw `args` field,
+  and the image entrypoint did not receive the intended shell command shape.
+- **Resolution:** Update the same pod with an explicit exec-form command:
+  `cmd: ["bash", "-lc", "<startup script>"]`, then restart it. Reusing the pod
+  preserved the completed image pull.
+- **Prevention:** For this image, always send startup scripts through the
+  structured `cmd` field and verify the deconstructed command in the pod read
+  before waiting for SSH.
+
+## 2026-10-03: First simulator evaluation crashed after building its URDF cache
+
+- **Symptom:** The first ACT evaluation initialized CUDA and Vulkan, downloaded
+  the CobotMagic and simulator resources, wrote the assembled dual-arm URDF,
+  and then exited with code 139.
+- **Evidence:** RAM, disk, VRAM, CUDA binding, and Vulkan device selection were
+  healthy. An identical retry found the cached URDF signature, skipped the
+  rebuild, initialized the full ClickBell environment, and completed normally.
+- **Resolution:** Treat one post-bootstrap crash as a cache-warming failure and
+  retry the one-episode smoke exactly once after confirming the downloaded and
+  assembled assets exist. Do not launch a multi-episode evaluation until that
+  retry passes.
+- **Prevention:** Warm DexSim with a one-episode smoke before a paid evaluation
+  batch. Preserve its cache for all evaluations in the same pod lifetime.
+
+## 2026-10-03: Path-stripping `sed` corrupted a checksum manifest
+
+- **Symptom:** Applying `sed -i 's#^.*/##'` to a SHA-256 manifest removed the
+  hash and directory prefix together, leaving only basenames.
+- **Resolution:** Recompute and manually verify the source and destination
+  hashes before using the transferred artifacts.
+- **Prevention:** Rewrite checksum paths structurally, for example with `awk`
+  printing the first field and `basename` of the second. Never edit a checksum
+  manifest with a greedy expression that spans the hash field.
